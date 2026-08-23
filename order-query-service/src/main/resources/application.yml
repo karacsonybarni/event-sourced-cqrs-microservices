@@ -1,0 +1,60 @@
+spring:
+  application:
+    name: order-query-service
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5434/orders_query}
+    username: ${DATABASE_USERNAME:orders}
+    password: ${DATABASE_PASSWORD:orders}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: order-query-projection-v1
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+    listener:
+      ack-mode: record
+
+server:
+  port: ${SERVER_PORT:8082}
+  shutdown: graceful
+
+orders:
+  events:
+    topic: orders.events.v1
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when_authorized
+  info:
+    env:
+      enabled: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+info:
+  app:
+    name: ${spring.application.name}
+    description: Event-driven CQRS order projection and query API

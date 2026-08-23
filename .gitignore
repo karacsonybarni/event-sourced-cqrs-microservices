@@ -1,0 +1,10 @@
+.idea/
+.vscode/
+*.iml
+.env
+*.key
+*.pem
+secrets/
+target/
+**/target/
+docker-data/

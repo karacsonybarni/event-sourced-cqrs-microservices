@@ -1,0 +1,128 @@
+name: cqrs-orders
+
+services:
+  command-db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: orders_command
+      POSTGRES_USER: orders
+      POSTGRES_PASSWORD: orders
+    ports:
+      - "5433:5432"
+    volumes:
+      - command-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orders -d orders_command"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  query-db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: orders_query
+      POSTGRES_USER: orders
+      POSTGRES_PASSWORD: orders
+    ports:
+      - "5434:5432"
+    volumes:
+      - query-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orders -d orders_query"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  kafka:
+    image: apache/kafka:4.1.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: CONTROLLER://:9093,PLAINTEXT://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  order-command-service:
+    build:
+      context: .
+      dockerfile: order-command-service/Dockerfile
+    environment:
+      DATABASE_URL: jdbc:postgresql://command-db:5432/orders_command
+      DATABASE_USERNAME: orders
+      DATABASE_PASSWORD: orders
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    ports:
+      - "8081:8081"
+    depends_on:
+      command-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  order-query-service:
+    build:
+      context: .
+      dockerfile: order-query-service/Dockerfile
+    environment:
+      DATABASE_URL: jdbc:postgresql://query-db:5432/orders_query
+      DATABASE_USERNAME: orders
+      DATABASE_PASSWORD: orders
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    ports:
+      - "8082:8082"
+    depends_on:
+      query-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    environment:
+      ORDER_COMMAND_SERVICE_URL: http://order-command-service:8081
+      ORDER_QUERY_SERVICE_URL: http://order-query-service:8082
+    ports:
+      - "8080:8080"
+    depends_on:
+      order-command-service:
+        condition: service_healthy
+      order-query-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+volumes:
+  command-db-data:
+  query-db-data:
