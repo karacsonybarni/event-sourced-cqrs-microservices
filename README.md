@@ -1,6 +1,7 @@
 # Event-Sourced CQRS Microservices
 
 [![CI](https://github.com/karacsonybarni/event-sourced-cqrs-microservices/actions/workflows/ci.yml/badge.svg)](https://github.com/karacsonybarni/event-sourced-cqrs-microservices/actions/workflows/ci.yml)
+[![AWS deployment](https://github.com/karacsonybarni/event-sourced-cqrs-microservices/actions/workflows/deploy-aws.yml/badge.svg)](https://github.com/karacsonybarni/event-sourced-cqrs-microservices/actions/workflows/deploy-aws.yml)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-6DB33F?logo=springboot)](https://spring.io/projects/spring-boot)
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk)](https://adoptium.net/)
 [![Debezium](https://img.shields.io/badge/Debezium-3.6.1.Final-2C4F7C)](https://debezium.io/)
@@ -66,6 +67,12 @@ Stop the stack and remove its local volumes with:
 ```bash
 make down
 ```
+
+## Deploy to AWS
+
+The repository includes a cost-controlled AWS deployment with Terraform, Amazon API Gateway, EC2, VPC networking, IAM, Systems Manager, CloudWatch, S3 remote state, GitHub Actions OIDC, automated delivery, and public end-to-end verification. It preserves the complete multi-replica Kafka and Debezium topology while keeping the economical environment honest about its single-host availability boundary.
+
+See [AWS cloud deployment](docs/aws-deployment.md) for the architecture, provisioning command, security model, operations, cost controls, and teardown procedure. [ADR-003](docs/adr/003-cost-optimized-aws-deployment.md) records why the economical topology uses one deployment host and how it evolves into managed production services.
 
 ## Try the API manually
 
@@ -143,6 +150,7 @@ The test suite covers aggregate replay, versioned serialization, append-only dat
 - springdoc-openapi 3.1.0
 - Micrometer Actuator and Prometheus metrics
 - Maven Wrapper, Docker Compose, GitHub Actions, Dependabot
+- Terraform, AWS API Gateway, EC2, VPC, IAM, Systems Manager, CloudWatch, and S3 remote state
 
 ## Repository map
 
@@ -154,7 +162,9 @@ order-query-service/    Kafka projection, read model, query API
 debezium/                replication user and connector registration
 docs/                    architecture narrative and decisions
 scripts/                 end-to-end and multi-replica failover checks
+infra/aws/               Terraform state bootstrap and AWS runtime infrastructure
 compose.yml              complete local platform
+compose.cloud.yml        cloud-only exposure, resource, secret, and logging policy
 ```
 
 ## License

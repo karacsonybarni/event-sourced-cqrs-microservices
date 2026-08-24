@@ -1,0 +1,120 @@
+services:
+  discovery-server:
+    ports: !override
+      - "127.0.0.1:8761:8761"
+    mem_limit: 512m
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        awslogs-stream-prefix: discovery-server
+
+  command-db:
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: "${COMMAND_DB_PASSWORD:?Set COMMAND_DB_PASSWORD}"
+    mem_limit: 384m
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        awslogs-stream-prefix: command-db
+
+  query-db:
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: "${QUERY_DB_PASSWORD:?Set QUERY_DB_PASSWORD}"
+    mem_limit: 384m
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        awslogs-stream-prefix: query-db
+
+  kafka:
+    ports: !reset []
+    mem_limit: 1g
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        awslogs-stream-prefix: kafka
+
+  kafka-init:
+    mem_limit: 256m
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        awslogs-stream-prefix: kafka-init
+
+  debezium:
+    ports: !override
+      - "127.0.0.1:8083:8083"
+    environment:
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+    mem_limit: 1g
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        awslogs-stream-prefix: debezium
+
+  debezium-init:
+    mem_limit: 128m
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        awslogs-stream-prefix: debezium-init
+
+  order-command-service:
+    ports: !reset []
+    environment:
+      DATABASE_PASSWORD: "${COMMAND_DB_PASSWORD:?Set COMMAND_DB_PASSWORD}"
+    mem_limit: 640m
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        awslogs-stream-prefix: order-command-service
+
+  order-query-service:
+    ports: !reset []
+    environment:
+      DATABASE_PASSWORD: "${QUERY_DB_PASSWORD:?Set QUERY_DB_PASSWORD}"
+    mem_limit: 640m
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        awslogs-stream-prefix: order-query-service
+
+  api-gateway:
+    environment:
+      MANAGEMENT_SERVER_PORT: 9080
+    ports: !override
+      - "0.0.0.0:8080:8080"
+      - "127.0.0.1:9080:9080"
+    mem_limit: 640m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9080/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        awslogs-stream-prefix: api-gateway

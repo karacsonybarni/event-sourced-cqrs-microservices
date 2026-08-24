@@ -40,7 +40,8 @@ wait_for_instance_count() {
 }
 
 create_order() {
-  local idempotency_key="scale-$(date +%s)-${RANDOM}"
+  local idempotency_key
+  idempotency_key="scale-$(date +%s)-${RANDOM}"
   local payload='{"customerId":"scale-customer","items":[{"productId":"keyboard","quantity":1,"unitPrice":99.90}]}'
   local attempts=30
   local response

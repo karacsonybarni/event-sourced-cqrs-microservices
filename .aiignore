@@ -3,3 +3,8 @@
 **/*.pem
 **/secrets/**
 **/target/**
+**/.terraform/**
+**/*.tfplan
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfvars

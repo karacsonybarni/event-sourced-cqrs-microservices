@@ -2,15 +2,17 @@
 set -Eeuo pipefail
 
 gateway_url="${GATEWAY_URL:-http://localhost:8080}"
+gateway_health_url="${GATEWAY_HEALTH_URL:-${gateway_url}}"
 discovery_url="${DISCOVERY_URL:-http://localhost:8761}"
 expected_command_instances="${EXPECTED_COMMAND_INSTANCES:-1}"
 expected_query_instances="${EXPECTED_QUERY_INSTANCES:-1}"
+verify_platform="${VERIFY_PLATFORM:-true}"
 idempotency_key="smoke-$(date +%s)-${RANDOM}"
 
 wait_for_health() {
   local attempts=30
   for ((attempt = 1; attempt <= attempts; attempt++)); do
-    if curl --fail --silent "${gateway_url}/actuator/health/readiness" | jq -e '.status == "UP"' >/dev/null; then
+    if curl --fail --silent "${gateway_health_url}/actuator/health/readiness" | jq -e '.status == "UP"' >/dev/null; then
       return 0
     fi
     sleep 1
@@ -62,9 +64,11 @@ wait_for_status() {
   return 1
 }
 
-wait_for_health
-wait_for_instances ORDER-COMMAND-SERVICE "${expected_command_instances}"
-wait_for_instances ORDER-QUERY-SERVICE "${expected_query_instances}"
+if [[ "${verify_platform}" == "true" ]]; then
+  wait_for_health
+  wait_for_instances ORDER-COMMAND-SERVICE "${expected_command_instances}"
+  wait_for_instances ORDER-QUERY-SERVICE "${expected_query_instances}"
+fi
 
 create_payload='{"customerId":"smoke-customer","items":[{"productId":"mechanical-keyboard","quantity":1,"unitPrice":129.90},{"productId":"wireless-mouse","quantity":2,"unitPrice":39.50}]}'
 create_response="$(curl --fail --silent \

@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+exec > >(tee /var/log/event-sourced-cqrs-bootstrap.log | logger -t event-sourced-cqrs-bootstrap -s 2>/dev/console) 2>&1
+
+dnf install --assumeyes curl docker git jq java-21-amazon-corretto-headless openssl util-linux
+systemctl enable --now docker
+
+compose_asset="docker-compose-linux-x86_64"
+compose_download_dir="$(mktemp -d)"
+trap 'rm -rf "$${compose_download_dir}"' EXIT
+curl --fail --silent --show-error --location \
+  "https://github.com/docker/compose/releases/download/${compose_version}/$${compose_asset}" \
+  --output "$${compose_download_dir}/$${compose_asset}"
+curl --fail --silent --show-error --location \
+  "https://github.com/docker/compose/releases/download/${compose_version}/$${compose_asset}.sha256" \
+  --output "$${compose_download_dir}/$${compose_asset}.sha256"
+cd "$${compose_download_dir}"
+sha256sum --check "$${compose_asset}.sha256"
+install --directory --mode 0755 /usr/local/lib/docker/cli-plugins
+install --mode 0755 "$${compose_asset}" /usr/local/lib/docker/cli-plugins/docker-compose
+
+install --directory --mode 0755 /opt/event-sourced-cqrs
+install --directory --mode 0700 /etc/event-sourced-cqrs
+
+if [[ ! -f /etc/event-sourced-cqrs/runtime.env ]]; then
+  command_db_password="$(openssl rand -hex 24)"
+  query_db_password="$(openssl rand -hex 24)"
+  umask 077
+  cat > /etc/event-sourced-cqrs/runtime.env <<EOF
+AWS_REGION=${aws_region}
+CLOUDWATCH_LOG_GROUP=${container_log_group_name}
+COMMAND_DB_PASSWORD=$${command_db_password}
+QUERY_DB_PASSWORD=$${query_db_password}
+EOF
+fi
+
+cat > /usr/local/bin/deploy-event-sourced-cqrs <<'SCRIPT'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+revision="$${1:-${repository_ref}}"
+repository_url="${repository_url}"
+application_directory="/opt/event-sourced-cqrs"
+
+exec 9>/var/lock/event-sourced-cqrs-deploy.lock
+if ! flock --nonblock 9; then
+  echo "Another cloud deployment is already running" >&2
+  exit 1
+fi
+
+if [[ ! -d "$${application_directory}/.git" ]]; then
+  git clone --filter=blob:none --no-checkout "$${repository_url}" "$${application_directory}"
+fi
+
+git -C "$${application_directory}" fetch --depth 1 origin "$${revision}"
+git -C "$${application_directory}" checkout --detach --force FETCH_HEAD
+
+exec "$${application_directory}/scripts/aws/runtime-deploy.sh"
+SCRIPT
+chmod 0755 /usr/local/bin/deploy-event-sourced-cqrs
+
+cat > /etc/systemd/system/event-sourced-cqrs.service <<'UNIT'
+[Unit]
+Description=Event-sourced CQRS microservices platform
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=1800
+ExecStart=/usr/local/bin/deploy-event-sourced-cqrs
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now event-sourced-cqrs.service

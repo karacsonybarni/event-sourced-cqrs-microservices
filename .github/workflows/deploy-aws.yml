@@ -1,0 +1,96 @@
+name: Deploy to AWS
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aws-cloud-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       vars.AWS_DEPLOY_ENABLED == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: cloud
+      url: ${{ vars.PUBLIC_API_URL }}
+    env:
+      DEPLOY_REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.DEPLOY_REVISION }}
+      - name: Configure short-lived AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: deploy-${{ github.run_id }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+      - name: Deploy through Systems Manager
+        env:
+          INSTANCE_ID: ${{ vars.AWS_INSTANCE_ID }}
+        run: |
+          for attempt in $(seq 1 60); do
+            ping_status="$(aws ssm describe-instance-information \
+              --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
+              --query 'InstanceInformationList[0].PingStatus' \
+              --output text)"
+            if [ "${ping_status}" = "Online" ]; then
+              break
+            fi
+            sleep 10
+          done
+          if [ "${ping_status}" != "Online" ]; then
+            echo "Instance ${INSTANCE_ID} was not online after ${attempt} checks" >&2
+            exit 1
+          fi
+
+          command_id="$(aws ssm send-command \
+            --instance-ids "${INSTANCE_ID}" \
+            --document-name AWS-RunShellScript \
+            --comment "Deploy ${DEPLOY_REVISION}" \
+            --parameters "commands=sudo cloud-init status --wait && sudo /usr/local/bin/deploy-event-sourced-cqrs ${DEPLOY_REVISION}" \
+            --query 'Command.CommandId' \
+            --output text)"
+
+          status=Pending
+          for attempt in $(seq 1 150); do
+            status="$(aws ssm get-command-invocation \
+              --command-id "${command_id}" \
+              --instance-id "${INSTANCE_ID}" \
+              --query 'Status' \
+              --output text 2>/dev/null || printf 'Pending')"
+            case "${status}" in
+              Success|Cancelled|Failed|TimedOut|Cancelling)
+                break
+                ;;
+            esac
+            sleep 10
+          done
+
+          aws ssm get-command-invocation \
+            --command-id "${command_id}" \
+            --instance-id "${INSTANCE_ID}" \
+            --query '{Status:Status,StandardOutput:StandardOutputContent,StandardError:StandardErrorContent}'
+          if [ "${status}" != "Success" ]; then
+            echo "Deployment command ended with ${status} after ${attempt} checks" >&2
+            exit 1
+          fi
+      - name: Verify the public event-sourced CQRS flow
+        env:
+          GATEWAY_URL: ${{ vars.PUBLIC_API_URL }}
+          VERIFY_PLATFORM: "false"
+        run: ./scripts/smoke-test.sh

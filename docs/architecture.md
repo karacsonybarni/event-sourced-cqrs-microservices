@@ -140,6 +140,10 @@ The read model can be rebuilt by resetting its projection state and replaying `o
 
 ## Scaling and production path
 
+The cost-optimized AWS environment packages the complete topology onto one encrypted EC2 host, places an API Gateway HTTP API at the public boundary, and uses Terraform, S3 remote state, GitHub OIDC, Systems Manager, CloudWatch, and explicit budgets for repeatable operations. Container memory limits reflect the measured runtime footprint, internal ports remain private, and the management endpoint is separated from public gateway traffic. See [AWS cloud deployment](aws-deployment.md) and [ADR-003](adr/003-cost-optimized-aws-deployment.md).
+
+That environment demonstrates application-level replica behavior but deliberately does not describe one host as highly available. The production evolution is:
+
 - Scale gateway and command instances statelessly; PostgreSQL uniqueness and stream locks coordinate writes.
 - Increase Kafka partitions and query consumers together. Keeping `aggregateId` as the key preserves per-stream order.
 - Monitor replication-slot lag, Kafka consumer lag, connector/task state, DLT depth, command latency, and projection latency.
