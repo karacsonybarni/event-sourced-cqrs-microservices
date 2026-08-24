@@ -2,7 +2,7 @@
 
 ## Context and goals
 
-This repository uses a small order lifecycle to expose the mechanics of an event-sourced CQRS system. Each service owns its database, command decisions derive only from aggregate history, and cross-service state propagation is visible as a versioned event.
+This repository uses a small order lifecycle to expose the mechanics of an event-sourced CQRS system. Each service owns its database, command decisions derive only from aggregate history, cross-service state propagation is visible as a versioned event, and replicated services are reached through registry-backed routing.
 
 The design favors explicit guarantees and local reproducibility. Event sourcing adds operational and modeling cost, so it should be selected where retaining business history, temporal reconstruction, auditability, or event-driven integration justifies that cost.
 
@@ -13,13 +13,16 @@ sequenceDiagram
     autonumber
     actor Client
     participant G as API Gateway
+    participant R as Eureka Registry
     participant C as Command Service
     participant ES as Command DB / Event Store
     participant D as Debezium
     participant K as Kafka
 
+    C->>R: register instance + renew lease
+    G->>R: discover command instances
     Client->>G: POST /api/orders + Idempotency-Key
-    G->>C: route command + X-Correlation-ID
+    G->>C: load-balanced command + X-Correlation-ID
     C->>ES: BEGIN
     C->>ES: claim key + command fingerprint
     C->>ES: append OrderCreated.v1 at expected version 0
@@ -73,6 +76,16 @@ sequenceDiagram
 
 The Kafka listener's database transaction includes both projection state and the processed-event record. The listener acknowledges only after that transaction returns. A redelivery after an acknowledgement failure becomes a no-op because `eventId` is already recorded.
 
+## Server-side discovery and horizontal scaling
+
+External clients know only the gateway's stable address. Command and query instances self-register with Eureka and renew short-lived leases. The gateway resolves `lb://order-command-service` and `lb://order-query-service` through Spring Cloud LoadBalancer, so instance selection remains behind the router rather than in external clients.
+
+The default Compose topology runs two command replicas and two query replicas. Backend host ports are assigned dynamically to avoid collisions; service traffic uses the private Compose network and discovered instance addresses. The scaling acceptance test stops each replica in turn, waits until Eureka removes it, and verifies that the gateway continues serving traffic through its peer.
+
+Command replicas are stateless. PostgreSQL owns client idempotency claims, aggregate stream locks, expected versions, and the atomic event append. Query replicas share one Kafka consumer group, so partitions are assigned across the active consumers; the aggregate ID remains the Kafka key, preserving per-stream order. Every query replica reads the same query database, while the processed-event table and aggregate version make redelivery idempotent.
+
+The local registry uses short lease and eviction intervals and disables Eureka self-preservation so failover is deterministic and observable. A production deployment should run a highly available registry with self-preservation enabled, or replace Eureka with the deployment platform's native service registry and load balancer.
+
 ## Event contract
 
 The JSONB stored in `order_events.payload` is the integration envelope emitted to Kafka:
@@ -122,6 +135,8 @@ The read model can be rebuilt by resetting its projection state and replaying `o
 | Idempotency key reused with another payload | Stored fingerprint differs | Return `409 Conflict` without another event |
 | Concurrent cancellation retries | Metadata-row lock serializes replay and append | Only the first transition appends version 2 |
 | Attempted event update or delete | Database trigger aborts the statement | Correct with a compensating event, never history mutation |
+| One command or query replica stops | Eureka lease expires and the gateway refreshes its instance list | Traffic continues through the surviving replica |
+| Registry unavailable after clients have cached instances | Existing cache can serve temporarily; topology changes are not discovered | Restore the registry; run it redundantly outside local development |
 
 ## Scaling and production path
 
@@ -132,4 +147,4 @@ The read model can be rebuilt by resetting its projection state and replaying `o
 - Add periodic aggregate snapshots only when measured replay cost requires them. Snapshots are derived caches, never replacements for history.
 - Add a schema registry or consumer-driven contract checks as the number of event producers and consumers grows.
 
-Authentication, service discovery, orchestration manifests, a tracing backend, and snapshotting are outside this compact implementation. The gateway is the natural OAuth2/OIDC enforcement point; Actuator exposes health and metrics integration points.
+Authentication, orchestration manifests, a tracing backend, and snapshotting are outside this compact implementation. The gateway is the natural OAuth2/OIDC enforcement point; Actuator exposes health and metrics integration points.

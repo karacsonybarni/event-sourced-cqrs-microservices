@@ -2,6 +2,9 @@
 set -Eeuo pipefail
 
 gateway_url="${GATEWAY_URL:-http://localhost:8080}"
+discovery_url="${DISCOVERY_URL:-http://localhost:8761}"
+expected_command_instances="${EXPECTED_COMMAND_INSTANCES:-1}"
+expected_query_instances="${EXPECTED_QUERY_INSTANCES:-1}"
 idempotency_key="smoke-$(date +%s)-${RANDOM}"
 
 wait_for_health() {
@@ -13,6 +16,32 @@ wait_for_health() {
     sleep 1
   done
   echo "Gateway did not become ready at ${gateway_url}" >&2
+  return 1
+}
+
+registry_instance_count() {
+  local application_name="$1"
+  local response
+  if ! response="$(curl --fail --silent \
+    --header 'Accept: application/json' \
+    "${discovery_url}/eureka/apps/${application_name}")"; then
+    printf '0\n'
+    return
+  fi
+  jq -r '[.application.instance[]? | select(.status == "UP")] | length' <<<"${response}"
+}
+
+wait_for_instances() {
+  local application_name="$1"
+  local expected_count="$2"
+  local attempts=60
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if [[ "$(registry_instance_count "${application_name}")" -ge "${expected_count}" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "${application_name} did not register ${expected_count} instances" >&2
   return 1
 }
 
@@ -34,6 +63,8 @@ wait_for_status() {
 }
 
 wait_for_health
+wait_for_instances ORDER-COMMAND-SERVICE "${expected_command_instances}"
+wait_for_instances ORDER-QUERY-SERVICE "${expected_query_instances}"
 
 create_payload='{"customerId":"smoke-customer","items":[{"productId":"mechanical-keyboard","quantity":1,"unitPrice":129.90},{"productId":"wireless-mouse","quantity":2,"unitPrice":39.50}]}'
 create_response="$(curl --fail --silent \

@@ -9,6 +9,7 @@ Run before opening a pull request:
 docker compose config --quiet
 make up
 make smoke
+make scale-smoke
 make down
 ```
 

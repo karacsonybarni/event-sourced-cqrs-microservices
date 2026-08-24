@@ -7,12 +7,12 @@ spring:
         webflux:
           routes:
             - id: order-commands
-              uri: ${ORDER_COMMAND_SERVICE_URL:http://localhost:8081}
+              uri: lb://order-command-service
               predicates:
                 - Path=/api/orders/**
                 - Method=POST,PUT,DELETE
             - id: order-queries
-              uri: ${ORDER_QUERY_SERVICE_URL:http://localhost:8082}
+              uri: lb://order-query-service
               predicates:
                 - Path=/api/orders/**
                 - Method=GET
@@ -20,6 +20,18 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
   shutdown: graceful
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+    healthcheck:
+      enabled: true
+    registry-fetch-interval-seconds: ${EUREKA_REGISTRY_FETCH_INTERVAL_SECONDS:30}
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: ${EUREKA_LEASE_RENEWAL_INTERVAL_SECONDS:30}
+    lease-expiration-duration-in-seconds: ${EUREKA_LEASE_EXPIRATION_SECONDS:90}
 
 management:
   endpoints:
@@ -31,6 +43,8 @@ management:
       probes:
         enabled: true
       show-details: when_authorized
+    gateway:
+      access: read-only
   info:
     env:
       enabled: true

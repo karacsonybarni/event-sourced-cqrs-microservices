@@ -19,6 +19,7 @@
   <description>CQRS microservices with event sourcing and Debezium change data capture</description>
 
   <modules>
+    <module>discovery-server</module>
     <module>api-gateway</module>
     <module>order-command-service</module>
     <module>order-query-service</module>

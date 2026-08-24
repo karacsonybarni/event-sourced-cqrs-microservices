@@ -1,11 +1,11 @@
 # Event-Sourced CQRS Microservices
 
-[![CI](https://github.com/karacsonybarni/microservices-architecture/actions/workflows/ci.yml/badge.svg)](https://github.com/karacsonybarni/microservices-architecture/actions/workflows/ci.yml)
+[![CI](https://github.com/karacsonybarni/event-sourced-cqrs-microservices/actions/workflows/ci.yml/badge.svg)](https://github.com/karacsonybarni/event-sourced-cqrs-microservices/actions/workflows/ci.yml)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-6DB33F?logo=springboot)](https://spring.io/projects/spring-boot)
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk)](https://adoptium.net/)
 [![Debezium](https://img.shields.io/badge/Debezium-3.6.1.Final-2C4F7C)](https://debezium.io/)
 
-A runnable reference architecture combining Command Query Responsibility Segregation (CQRS), event sourcing, and Debezium change data capture. The command database stores immutable domain events as the source of truth, Debezium streams committed inserts to Kafka, and the query service builds a disposable read model.
+A runnable reference architecture combining Command Query Responsibility Segregation (CQRS), event sourcing, Debezium change data capture, registry-backed service discovery, and horizontal scaling. The command database stores immutable domain events as the source of truth, Debezium streams committed inserts to Kafka, and replicated query services build and serve a disposable read model.
 
 The design follows the pattern language at [microservices.io](https://microservices.io/patterns/microservices.html), especially [Event Sourcing](https://microservices.io/patterns/data/event-sourcing.html), [CQRS](https://microservices.io/patterns/data/cqrs.html), [Database per Service](https://microservices.io/patterns/data/database-per-service.html), [API Gateway](https://microservices.io/patterns/apigateway.html), and [Idempotent Consumer](https://microservices.io/patterns/communication-style/idempotent-consumer.html).
 
@@ -14,8 +14,12 @@ The design follows the pattern language at [microservices.io](https://microservi
 ```mermaid
 flowchart LR
     Client([Client]) -->|HTTP :8080| Gateway[Spring Cloud<br/>API Gateway]
-    Gateway -->|POST / PUT| Command[Order Command Service<br/>write model :8081]
-    Gateway -->|GET| Query[Order Query Service<br/>read model :8082]
+    Registry[Eureka<br/>Service Registry]
+    Gateway <-->|discover instances| Registry
+    Command[Order Command Service<br/>2 replicas] -->|self-register| Registry
+    Query[Order Query Service<br/>2 replicas] -->|self-register| Registry
+    Gateway -->|lb:// POST / PUT| Command
+    Gateway -->|lb:// GET| Query
 
     Command -->|append in one ACID transaction| EventStore[(Command PostgreSQL<br/>append-only event store)]
     EventStore -->|logical replication / WAL| Debezium[Debezium<br/>PostgreSQL connector]
@@ -29,6 +33,7 @@ flowchart LR
 | Component | Responsibility | Data ownership |
 | --- | --- | --- |
 | `api-gateway` | Method-aware routing and correlation IDs | None |
+| `discovery-server` | Instance registry and health-aware service lookup | Registry leases |
 | `order-command-service` | Validates commands, replays aggregates, appends events | Event streams and command deduplication |
 | Debezium | Captures committed event inserts from PostgreSQL WAL | Replication offset and connector state |
 | `order-query-service` | Projects events and serves query-optimized responses | Order read model and processed-event IDs |
@@ -45,7 +50,7 @@ make up
 make smoke
 ```
 
-`make up` compiles the services, starts PostgreSQL, Kafka, Debezium, and the APIs, registers the connector idempotently, and waits for health checks. `make smoke` proves this flow through the gateway:
+`make up` compiles the services, starts PostgreSQL, Kafka, Debezium, Eureka, the gateway, two command-service replicas, and two query-service replicas, registers the connector idempotently, and waits for health checks. `make smoke` proves this flow through the gateway:
 
 1. create an order;
 2. repeat the same command and verify idempotent replay;
@@ -53,6 +58,8 @@ make smoke
 4. wait for Debezium and Kafka to update the query model;
 5. cancel the order; and
 6. verify the read model advances from event version 1 to 2.
+
+`make scale-smoke` then stops every command and query replica in turn. It waits for Eureka to evict the stopped instance and proves that the gateway continues routing commands and queries to the surviving replica before restoring the full topology.
 
 Stop the stack and remove its local volumes with:
 
@@ -87,11 +94,17 @@ curl 'http://localhost:8080/api/orders?customerId=customer-42&status=CANCELLED'
 
 Operational endpoints:
 
-- Command API: [http://localhost:8081/swagger-ui.html](http://localhost:8081/swagger-ui.html)
-- Query API: [http://localhost:8082/swagger-ui.html](http://localhost:8082/swagger-ui.html)
+- Eureka registry: [http://localhost:8761](http://localhost:8761)
 - Debezium Connect: [http://localhost:8083/connectors/order-events/status](http://localhost:8083/connectors/order-events/status)
 - Gateway health: [http://localhost:8080/actuator/health](http://localhost:8080/actuator/health)
 - Prometheus metrics: `/actuator/prometheus` on every Spring service
+
+Backend replicas receive random host ports so they can scale without collisions. Resolve a replica's host port when direct Swagger or Actuator access is needed:
+
+```bash
+docker compose port --index 1 order-command-service 8081
+docker compose port --index 1 order-query-service 8082
+```
 
 ## Event-sourcing and delivery guarantees
 
@@ -114,15 +127,16 @@ See [Architecture](docs/architecture.md) for the detailed mechanics and [ADR-001
 docker compose config --quiet
 make up
 make smoke
+make scale-smoke
 ```
 
-The test suite covers aggregate replay, versioned serialization, append-only database enforcement, concurrent create/cancel commands, idempotent command fingerprints, duplicate event delivery, stale projection versions, dead-letter routing, API behavior, and gateway correlation IDs. The smoke test adds real PostgreSQL logical decoding, Debezium, Kafka, both databases, Flyway, and all HTTP services.
+The test suite covers aggregate replay, versioned serialization, append-only database enforcement, concurrent create/cancel commands, idempotent command fingerprints, duplicate event delivery, stale projection versions, dead-letter routing, API behavior, gateway correlation IDs, and load-balanced route configuration. The smoke tests add real PostgreSQL logical decoding, Debezium, Kafka, Eureka registration, two replicas of each business service, instance eviction, failover, both databases, Flyway, and all HTTP services.
 
 ## Technology baseline
 
 - Java 21 LTS
 - Spring Boot 4.1.1
-- Spring Cloud 2025.1.3 and Spring Cloud Gateway
+- Spring Cloud 2025.1.3, Spring Cloud Gateway, LoadBalancer, and Netflix Eureka
 - Spring Data JPA, Flyway, PostgreSQL 18
 - Debezium 3.6.1.Final PostgreSQL connector
 - Spring for Apache Kafka and Apache Kafka 4.3.1 in KRaft mode
@@ -134,11 +148,12 @@ The test suite covers aggregate replay, versioned serialization, append-only dat
 
 ```text
 api-gateway/             HTTP entry point and routing
+discovery-server/        Eureka service registry
 order-command-service/  event-sourced aggregate, event store, command API
 order-query-service/    Kafka projection, read model, query API
 debezium/                replication user and connector registration
 docs/                    architecture narrative and decisions
-scripts/smoke-test.sh    executable end-to-end acceptance flow
+scripts/                 end-to-end and multi-replica failover checks
 compose.yml              complete local platform
 ```
 
