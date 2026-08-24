@@ -21,6 +21,22 @@ done
 aws sts get-caller-identity >/dev/null
 gh auth status --hostname github.com >/dev/null
 
+verify_aws_service_access() {
+  local service_name="$1"
+  shift
+
+  local error_output
+  if ! error_output="$("$@" 2>&1 >/dev/null)"; then
+    printf 'AWS account cannot access %s. New-account activation may still be in progress.\n%s\n' \
+      "${service_name}" "${error_output}" >&2
+    return 1
+  fi
+}
+
+verify_aws_service_access "Amazon S3" aws s3api list-buckets --max-items 1
+verify_aws_service_access "Amazon EC2 in ${aws_region}" \
+  aws ec2 describe-regions --region "${aws_region}" --region-names "${aws_region}"
+
 terraform -chdir="${repository_root}/infra/aws/bootstrap" init -input=false
 terraform -chdir="${repository_root}/infra/aws/bootstrap" apply \
   -input=false \
