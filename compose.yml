@@ -3,6 +3,14 @@ name: cqrs-orders
 services:
   command-db:
     image: postgres:18-alpine
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=4
+      - -c
+      - max_wal_senders=4
     environment:
       POSTGRES_DB: orders_command
       POSTGRES_USER: orders
@@ -11,6 +19,7 @@ services:
       - "5433:5432"
     volumes:
       - command-db-data:/var/lib/postgresql
+      - ./debezium/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U orders -d orders_command"]
       interval: 3s
@@ -34,7 +43,7 @@ services:
       retries: 20
 
   kafka:
-    image: apache/kafka:4.1.1
+    image: apache/kafka:4.3.1
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -56,6 +65,72 @@ services:
       timeout: 5s
       retries: 20
 
+  kafka-init:
+    image: apache/kafka:4.3.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - /bin/bash
+      - -c
+      - |
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka:9092 \
+          --create \
+          --if-not-exists \
+          --topic orders.events.v1 \
+          --partitions 3 \
+          --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka:9092 \
+          --create \
+          --if-not-exists \
+          --topic orders.events.v1.DLT \
+          --partitions 3 \
+          --replication-factor 1
+
+  debezium:
+    image: quay.io/debezium/connect:3.6.1.Final
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: orders-debezium
+      CONFIG_STORAGE_TOPIC: orders.connect.configs
+      OFFSET_STORAGE_TOPIC: orders.connect.offsets
+      STATUS_STORAGE_TOPIC: orders.connect.statuses
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+    ports:
+      - "8083:8083"
+    depends_on:
+      command-db:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:8083/connectors >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  debezium-init:
+    image: curlimages/curl:8.16.0
+    user: root
+    volumes:
+      - ./debezium/order-events-connector.json:/config/order-events-connector.json:ro
+      - ./debezium/register-connector.sh:/config/register-connector.sh:ro
+    entrypoint: ["/bin/sh", "/config/register-connector.sh"]
+    depends_on:
+      debezium:
+        condition: service_healthy
+      order-command-service:
+        condition: service_healthy
+
   order-command-service:
     build:
       context: .
@@ -64,13 +139,10 @@ services:
       DATABASE_URL: jdbc:postgresql://command-db:5432/orders_command
       DATABASE_USERNAME: orders
       DATABASE_PASSWORD: orders
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     ports:
       - "8081:8081"
     depends_on:
       command-db:
-        condition: service_healthy
-      kafka:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health/readiness | grep -q UP"]
@@ -93,8 +165,8 @@ services:
     depends_on:
       query-db:
         condition: service_healthy
-      kafka:
-        condition: service_healthy
+      debezium-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8082/actuator/health/readiness | grep -q UP"]
       interval: 5s

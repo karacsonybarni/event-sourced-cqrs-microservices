@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 gateway_url="${GATEWAY_URL:-http://localhost:8080}"
-idempotency_key="showcase-$(date +%s)-${RANDOM}"
+idempotency_key="smoke-$(date +%s)-${RANDOM}"
 
 wait_for_health() {
   local attempts=30
@@ -35,7 +35,7 @@ wait_for_status() {
 
 wait_for_health
 
-create_payload='{"customerId":"interview-customer","items":[{"productId":"mechanical-keyboard","quantity":1,"unitPrice":129.90},{"productId":"wireless-mouse","quantity":2,"unitPrice":39.50}]}'
+create_payload='{"customerId":"smoke-customer","items":[{"productId":"mechanical-keyboard","quantity":1,"unitPrice":129.90},{"productId":"wireless-mouse","quantity":2,"unitPrice":39.50}]}'
 create_response="$(curl --fail --silent \
   --request POST \
   --header 'Content-Type: application/json' \
@@ -75,4 +75,4 @@ curl --fail --silent \
 cancelled_view="$(wait_for_status "${order_id}" CANCELLED)"
 jq -e '.version == 2' <<<"${cancelled_view}" >/dev/null
 
-printf 'CQRS smoke test passed for order %s: CREATED -> CANCELLED\n' "${order_id}"
+printf 'Event-sourced CQRS smoke test passed for order %s: CREATED -> CANCELLED\n' "${order_id}"

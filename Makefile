@@ -17,7 +17,7 @@ smoke:
 	./scripts/smoke-test.sh
 
 logs:
-	docker compose logs -f api-gateway order-command-service order-query-service
+	docker compose logs -f api-gateway order-command-service order-query-service debezium
 
 clean:
 	./mvnw clean

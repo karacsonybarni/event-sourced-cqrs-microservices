@@ -1,12 +1,13 @@
-# CQRS Microservices Architecture Showcase
+# Event-Sourced CQRS Microservices
 
 [![CI](https://github.com/karacsonybarni/microservices-architecture/actions/workflows/ci.yml/badge.svg)](https://github.com/karacsonybarni/microservices-architecture/actions/workflows/ci.yml)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-6DB33F?logo=springboot)](https://spring.io/projects/spring-boot)
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk)](https://adoptium.net/)
+[![Debezium](https://img.shields.io/badge/Debezium-3.6.1.Final-2C4F7C)](https://debezium.io/)
 
-An interview-ready reference implementation of Command Query Responsibility Segregation (CQRS) with Spring Boot. It demonstrates the production concerns that make CQRS meaningful: independently owned databases, asynchronous projections, a transactional outbox, idempotent commands and consumers, ordered versioned events, dead-letter handling, schema migrations, an API gateway, observability, and one-command local startup.
+A runnable reference architecture combining Command Query Responsibility Segregation (CQRS), event sourcing, and Debezium change data capture. The command database stores immutable domain events as the source of truth, Debezium streams committed inserts to Kafka, and the query service builds a disposable read model.
 
-The design follows the pattern language in [microservices.io's microservice architecture](https://microservices.io/patterns/microservices.html), especially [CQRS](https://microservices.io/patterns/data/cqrs.html), [Database per Service](https://microservices.io/patterns/data/database-per-service.html), [API Gateway](https://microservices.io/patterns/apigateway.html), [Transactional Outbox](https://microservices.io/patterns/data/transactional-outbox.html), and [Idempotent Consumer](https://microservices.io/patterns/communication-style/idempotent-consumer.html).
+The design follows the pattern language at [microservices.io](https://microservices.io/patterns/microservices.html), especially [Event Sourcing](https://microservices.io/patterns/data/event-sourcing.html), [CQRS](https://microservices.io/patterns/data/cqrs.html), [Database per Service](https://microservices.io/patterns/data/database-per-service.html), [API Gateway](https://microservices.io/patterns/apigateway.html), and [Idempotent Consumer](https://microservices.io/patterns/communication-style/idempotent-consumer.html).
 
 ## Architecture at a glance
 
@@ -16,23 +17,24 @@ flowchart LR
     Gateway -->|POST / PUT| Command[Order Command Service<br/>write model :8081]
     Gateway -->|GET| Query[Order Query Service<br/>read model :8082]
 
-    Command -->|single ACID transaction| CommandDB[(Command PostgreSQL<br/>orders + outbox)]
-    CommandDB --> Publisher[Outbox poller]
-    Publisher -->|versioned events<br/>keyed by orderId| Kafka{{Apache Kafka}}
+    Command -->|append in one ACID transaction| EventStore[(Command PostgreSQL<br/>append-only event store)]
+    EventStore -->|logical replication / WAL| Debezium[Debezium<br/>PostgreSQL connector]
+    Debezium -->|versioned envelope<br/>keyed by orderId| Kafka{{Apache Kafka}}
     Kafka -->|at-least-once| Projector[Idempotent projector]
     Projector --> QueryDB[(Query PostgreSQL<br/>denormalized views)]
     Query --> QueryDB
-    Kafka -. failures .-> DLT[(Dead-letter topic)]
+    Kafka -. poison events .-> DLT[(Dead-letter topic)]
 ```
 
 | Component | Responsibility | Data ownership |
 | --- | --- | --- |
 | `api-gateway` | Method-aware routing and correlation IDs | None |
-| `order-command-service` | Validates and executes create/cancel commands | Order aggregate, command deduplication, outbox |
-| `order-query-service` | Projects events and serves query-optimized responses | Order read model, processed-event IDs |
-| Kafka | Durable asynchronous event transport | `orders.events.v1` and its DLT |
+| `order-command-service` | Validates commands, replays aggregates, appends events | Event streams and command deduplication |
+| Debezium | Captures committed event inserts from PostgreSQL WAL | Replication offset and connector state |
+| `order-query-service` | Projects events and serves query-optimized responses | Order read model and processed-event IDs |
+| Kafka | Durable asynchronous transport | `orders.events.v1` and `orders.events.v1.DLT` |
 
-The write and read services share neither a database nor a Java model. Their only integration contract is the versioned event envelope. This keeps the CQRS boundary visible instead of hiding it inside one process.
+The write and read services share neither a database nor a Java model. Their integration contract is the versioned event envelope stored in `order_events` and emitted unchanged by Debezium.
 
 ## Run the complete system
 
@@ -43,17 +45,16 @@ make up
 make smoke
 ```
 
-`make up` builds all services and waits for health checks. `make smoke` proves the complete flow through the gateway:
+`make up` compiles the services, starts PostgreSQL, Kafka, Debezium, and the APIs, registers the connector idempotently, and waits for health checks. `make smoke` proves this flow through the gateway:
 
 1. create an order;
-2. repeat the command with the same idempotency key;
-3. prove that reusing the key for a different payload returns `409 Conflict`;
-4. wait for the Kafka-driven read projection;
-5. verify the calculated total and event version;
-6. cancel the order; and
-7. verify the eventual read-model transition from `CREATED` to `CANCELLED`.
+2. repeat the same command and verify idempotent replay;
+3. reuse the key with another payload and verify `409 Conflict`;
+4. wait for Debezium and Kafka to update the query model;
+5. cancel the order; and
+6. verify the read model advances from event version 1 to 2.
 
-Stop the stack and delete its local volumes with:
+Stop the stack and remove its local volumes with:
 
 ```bash
 make down
@@ -66,7 +67,7 @@ All client traffic enters through `http://localhost:8080`.
 ```bash
 curl --request POST http://localhost:8080/api/orders \
   --header 'Content-Type: application/json' \
-  --header 'Idempotency-Key: interview-demo-1' \
+  --header 'Idempotency-Key: order-demo-1' \
   --data '{
     "customerId": "customer-42",
     "items": [
@@ -76,7 +77,7 @@ curl --request POST http://localhost:8080/api/orders \
   }'
 ```
 
-The command returns `202 Accepted` because the write has committed but the read model is updated asynchronously. Use its `orderId` to query and cancel:
+The command returns `202 Accepted` after the event-store transaction commits. Use the returned `orderId` to query and cancel:
 
 ```bash
 curl http://localhost:8080/api/orders/{orderId}
@@ -84,55 +85,47 @@ curl --request PUT http://localhost:8080/api/orders/{orderId}/cancellation
 curl 'http://localhost:8080/api/orders?customerId=customer-42&status=CANCELLED'
 ```
 
-Service-local API documentation is available at:
+Operational endpoints:
 
 - Command API: [http://localhost:8081/swagger-ui.html](http://localhost:8081/swagger-ui.html)
 - Query API: [http://localhost:8082/swagger-ui.html](http://localhost:8082/swagger-ui.html)
-- Health: [http://localhost:8080/actuator/health](http://localhost:8080/actuator/health)
-- Prometheus metrics: `/actuator/prometheus` on every service
+- Debezium Connect: [http://localhost:8083/connectors/order-events/status](http://localhost:8083/connectors/order-events/status)
+- Gateway health: [http://localhost:8080/actuator/health](http://localhost:8080/actuator/health)
+- Prometheus metrics: `/actuator/prometheus` on every Spring service
 
-## Reliability semantics
+## Event-sourcing and delivery guarantees
 
-This project makes its guarantees explicit:
+- **Events are authoritative:** an `Order` is reconstructed by replaying its ordered event stream; no mutable order table exists.
+- **Append-only enforcement:** PostgreSQL rejects `UPDATE` and `DELETE` against `order_events`, and a unique `(aggregate_id, aggregate_version)` constraint rejects conflicting stream positions.
+- **Optimistic stream version plus row serialization:** `aggregate_streams.current_version` is concurrency metadata. A row lock serializes concurrent transitions while the event history remains the source of aggregate state.
+- **No application-level database/Kafka dual write:** the command transaction ends after appending the event. Debezium reads only committed WAL changes and owns publication to Kafka.
+- **At-least-once delivery:** connector or consumer recovery can redeliver a record. `processed_events.event_id` makes projection replay harmless.
+- **Per-order ordering:** every event has a contiguous aggregate version and uses `orderId` as its Kafka key, preserving the partition-ordering boundary.
+- **Poison-event isolation:** projection failures retry twice and then move to `orders.events.v1.DLT`.
+- **Idempotent client retries:** PostgreSQL atomically claims `Idempotency-Key` and binds it to a deterministic request fingerprint.
+- **Honest eventual consistency:** query responses include `X-Data-Consistency: eventual`; a newly committed order may briefly be absent from the read side.
 
-- **No database/Kafka dual write:** the command service stores the aggregate and outbox row in one local transaction.
-- **At-least-once delivery:** the outbox publisher marks an event only after Kafka acknowledges it. A crash in between can publish a duplicate.
-- **Idempotent projection:** `processed_events.event_id` makes duplicate delivery harmless.
-- **Per-order ordering:** PostgreSQL assigns each outbox row a monotonic relay sequence, the publisher polls by that sequence, and all events use `orderId` as the Kafka key. `aggregateVersion` remains the projection guard.
-- **Poison-message isolation:** projection failures retry twice and then move to `orders.events.v1.DLT`.
-- **Idempotent client retries:** PostgreSQL atomically claims `Idempotency-Key`; concurrent retries of the same logical create command resolve to one order and one outbox event. The key is bound to a deterministic request fingerprint, so a different payload returns `409 Conflict`.
-- **Honest eventual consistency:** query responses include `X-Data-Consistency: eventual`; a new order may briefly return `404` from the read side.
+See [Architecture](docs/architecture.md) for the detailed mechanics and [ADR-001](docs/adr/001-event-sourcing-and-debezium-cdc.md) for the main trade-offs.
 
-See [Architecture](docs/architecture.md) for the detailed flows and [ADR-001](docs/adr/001-cqrs-and-transactional-outbox.md) for the main trade-offs.
-
-## Build and test
+## Verification
 
 ```bash
 ./mvnw clean verify
 docker compose config --quiet
+make up
+make smoke
 ```
 
-The test suite includes PostgreSQL-backed concurrent command and relay-ordering tests in addition to aggregate invariants, event contract shape, duplicate consumer delivery, stale event versions, projection transitions, and gateway correlation IDs. The runtime smoke test covers both databases, Flyway migrations, Kafka transport, gateway routing, idempotency conflict handling, and eventual consistency end to end.
-
-## Interview discussion guide
-
-Good questions to explore from this codebase:
-
-- Why CQRS here? The read side can evolve and scale independently, and expensive query shapes do not compromise the write aggregate. The cost is eventual consistency and operational complexity.
-- Why an outbox instead of publishing in the controller? A process crash cannot leave a committed order with no durable event intent.
-- Why not claim exactly-once delivery? Kafka and a relational database do not share one transaction. At-least-once plus idempotency gives a simpler, observable guarantee.
-- Why a polling publisher? It is transparent and easy to run locally. At larger scale, Change Data Capture (for example Debezium) can replace the poller without changing the domain transaction.
-- Why separate PostgreSQL containers? Database per service is an ownership boundary, not merely separate table names.
-- Why no shared event library? Independently deployable services should not require lockstep Java releases. The event name is versioned and each consumer owns its local representation.
-- What would production add? OAuth2/OIDC at the gateway, TLS and ACLs, a schema registry or consumer-driven contracts, Debezium, distributed tracing, alerting on outbox lag and DLT depth, and orchestration manifests.
+The test suite covers aggregate replay, versioned serialization, append-only database enforcement, concurrent create/cancel commands, idempotent command fingerprints, duplicate event delivery, stale projection versions, dead-letter routing, API behavior, and gateway correlation IDs. The smoke test adds real PostgreSQL logical decoding, Debezium, Kafka, both databases, Flyway, and all HTTP services.
 
 ## Technology baseline
 
 - Java 21 LTS
 - Spring Boot 4.1.1
-- Spring Cloud 2025.1.2 / Spring Cloud Gateway
-- Spring Data JPA, Flyway, PostgreSQL
-- Spring for Apache Kafka / Apache Kafka in KRaft mode
+- Spring Cloud 2025.1.3 and Spring Cloud Gateway
+- Spring Data JPA, Flyway, PostgreSQL 18
+- Debezium 3.6.1.Final PostgreSQL connector
+- Spring for Apache Kafka and Apache Kafka 4.3.1 in KRaft mode
 - springdoc-openapi 3.1.0
 - Micrometer Actuator and Prometheus metrics
 - Maven Wrapper, Docker Compose, GitHub Actions, Dependabot
@@ -141,8 +134,9 @@ Good questions to explore from this codebase:
 
 ```text
 api-gateway/             HTTP entry point and routing
-order-command-service/  write aggregate, command API, transactional outbox
+order-command-service/  event-sourced aggregate, event store, command API
 order-query-service/    Kafka projection, read model, query API
+debezium/                replication user and connector registration
 docs/                    architecture narrative and decisions
 scripts/smoke-test.sh    executable end-to-end acceptance flow
 compose.yml              complete local platform

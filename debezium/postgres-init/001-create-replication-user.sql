@@ -1,0 +1,2 @@
+CREATE ROLE debezium WITH REPLICATION LOGIN PASSWORD 'debezium';
+GRANT CONNECT ON DATABASE orders_command TO debezium;

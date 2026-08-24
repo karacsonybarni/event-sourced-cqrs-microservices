@@ -37,7 +37,7 @@ class CorrelationIdFilterTest {
     @Test
     void preservesCallerProvidedCorrelationId() {
         ServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/orders")
-                .header(CorrelationIdFilter.CORRELATION_ID, "interview-demo-42"));
+                .header(CorrelationIdFilter.CORRELATION_ID, "caller-request-42"));
         AtomicReference<ServerWebExchange> forwardedExchange = new AtomicReference<>();
 
         StepVerifier.create(filter.filter(exchange, forwarded -> {
@@ -46,6 +46,6 @@ class CorrelationIdFilterTest {
         })).verifyComplete();
 
         assertThat(forwardedExchange.get().getRequest().getHeaders()
-                .getFirst(CorrelationIdFilter.CORRELATION_ID)).isEqualTo("interview-demo-42");
+                .getFirst(CorrelationIdFilter.CORRELATION_ID)).isEqualTo("caller-request-42");
     }
 }

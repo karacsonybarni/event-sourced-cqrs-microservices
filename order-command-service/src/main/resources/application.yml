@@ -13,24 +13,9 @@ spring:
       hibernate:
         jdbc:
           time_zone: UTC
-  kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
-      acks: all
-      properties:
-        enable.idempotence: true
-
 server:
   port: ${SERVER_PORT:8081}
   shutdown: graceful
-
-orders:
-  events:
-    topic: orders.events.v1
-  outbox:
-    publish-interval: ${OUTBOX_PUBLISH_INTERVAL:500}
 
 management:
   endpoints:
@@ -53,4 +38,4 @@ springdoc:
 info:
   app:
     name: ${spring.application.name}
-    description: CQRS write model and transactional outbox
+    description: Event-sourced CQRS write model

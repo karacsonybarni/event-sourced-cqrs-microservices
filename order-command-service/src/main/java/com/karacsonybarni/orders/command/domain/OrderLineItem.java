@@ -2,40 +2,18 @@ package com.karacsonybarni.orders.command.domain;
 
 import java.math.BigDecimal;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Embeddable;
+public record OrderLineItem(String productId, int quantity, BigDecimal unitPrice) {
 
-@Embeddable
-public class OrderLineItem {
-
-    @Column(name = "product_id", nullable = false, length = 100)
-    private String productId;
-
-    @Column(nullable = false)
-    private int quantity;
-
-    @Column(name = "unit_price", nullable = false, precision = 19, scale = 2)
-    private BigDecimal unitPrice;
-
-    protected OrderLineItem() {
-    }
-
-    public OrderLineItem(String productId, int quantity, BigDecimal unitPrice) {
-        this.productId = productId;
-        this.quantity = quantity;
-        this.unitPrice = unitPrice;
-    }
-
-    public String getProductId() {
-        return productId;
-    }
-
-    public int getQuantity() {
-        return quantity;
-    }
-
-    public BigDecimal getUnitPrice() {
-        return unitPrice;
+    public OrderLineItem {
+        if (productId == null || productId.isBlank()) {
+            throw new IllegalArgumentException("Product ID must not be blank");
+        }
+        if (quantity < 1) {
+            throw new IllegalArgumentException("Quantity must be positive");
+        }
+        if (unitPrice == null || unitPrice.signum() <= 0) {
+            throw new IllegalArgumentException("Unit price must be positive");
+        }
     }
 
     public BigDecimal lineTotal() {

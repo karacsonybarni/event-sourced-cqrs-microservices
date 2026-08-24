@@ -15,8 +15,8 @@
   <artifactId>microservices-architecture</artifactId>
   <version>1.0.0-SNAPSHOT</version>
   <packaging>pom</packaging>
-  <name>Microservices Architecture Showcase</name>
-  <description>Interview-ready CQRS microservices reference architecture</description>
+  <name>Event-Sourced CQRS Microservices</name>
+  <description>CQRS microservices with event sourcing and Debezium change data capture</description>
 
   <modules>
     <module>api-gateway</module>

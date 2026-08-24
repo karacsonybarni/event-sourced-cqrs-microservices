@@ -19,6 +19,12 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+      - name: Reject purpose-specific presentation wording
+        run: |
+          if git grep -I -n -i -E 'inter[v]iew|show[c]ase'; then
+            echo 'Use architecture-focused wording in maintained artifacts.' >&2
+            exit 1
+          fi
       - name: Verify Maven reactor
         run: ./mvnw --batch-mode --no-transfer-progress clean verify
       - name: Validate Docker Compose model

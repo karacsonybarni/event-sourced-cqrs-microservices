@@ -2,11 +2,11 @@
 
 ## Context and goals
 
-This is a deliberately small order domain wrapped in realistic distributed-systems mechanics. The goal is to make the architectural decisions inspectable: every service owns its schema, writes never depend on the query database, and all cross-service state propagation is observable as a versioned event.
+This repository uses a small order lifecycle to expose the mechanics of an event-sourced CQRS system. Each service owns its database, command decisions derive only from aggregate history, and cross-service state propagation is visible as a versioned event.
 
-The sample optimizes for clarity, local reproducibility, and an honest delivery model. It is not a claim that every CRUD service needs CQRS.
+The design favors explicit guarantees and local reproducibility. Event sourcing adds operational and modeling cost, so it should be selected where retaining business history, temporal reconstruction, auditability, or event-driven integration justifies that cost.
 
-## Command flow
+## Command and capture flow
 
 ```mermaid
 sequenceDiagram
@@ -14,27 +14,38 @@ sequenceDiagram
     actor Client
     participant G as API Gateway
     participant C as Command Service
-    participant CD as Command DB
-    participant O as Outbox Publisher
+    participant ES as Command DB / Event Store
+    participant D as Debezium
     participant K as Kafka
 
     Client->>G: POST /api/orders + Idempotency-Key
     G->>C: route command + X-Correlation-ID
-    C->>CD: BEGIN
-    C->>CD: claim Idempotency-Key + request fingerprint
-    C->>CD: INSERT order and items (claim FK is deferred)
-    C->>CD: INSERT OrderCreated.v1 outbox row
-    C->>CD: COMMIT
+    C->>ES: BEGIN
+    C->>ES: claim key + command fingerprint
+    C->>ES: append OrderCreated.v1 at expected version 0
+    C->>ES: advance stream metadata to version 1
+    C->>ES: COMMIT
     C-->>Client: 202 Accepted + orderId
-    loop polling batch
-        O->>CD: lock unpublished rows by DB relay sequence
-        O->>K: publish(key = orderId)
-        K-->>O: acknowledgement
-        O->>CD: mark published
-    end
+    ES-->>D: committed INSERT via logical replication
+    D->>K: envelope keyed by orderId
 ```
 
-The command response confirms the write-side transaction only. It does not pretend that the asynchronously updated query model is already current.
+The command service never calls Kafka. Its local transaction contains the command idempotency claim, the immutable event insert, and the stream-version update. PostgreSQL's deferred foreign key allows the idempotency claim and new aggregate stream to be created in that order while still committing atomically.
+
+Debezium uses PostgreSQL's `pgoutput` logical-decoding plugin and a publication restricted to `public.order_events`. The Outbox Event Router single-message transform treats each event-store row as the publication record, extracts its JSONB payload, selects the Kafka key from `aggregate_id`, and routes `aggregate_type = orders` to `orders.events.v1`.
+
+## Aggregate reconstruction
+
+The `Order` domain object is persistence-agnostic. Loading an order reads events by `aggregate_version`, deserializes them to domain events, and applies them in sequence:
+
+```text
+OrderCreated.v1  -> CREATED, version 1
+OrderCancelled.v1 -> CANCELLED, version 2
+```
+
+New decisions record uncommitted events. The event store locks the small `aggregate_streams` metadata row, verifies the expected version, inserts the next event, and advances `current_version` in the same transaction. This avoids rewriting historical rows while rejecting two writers attempting the same stream position.
+
+The metadata table is not an alternate source of business state. It contains only aggregate identity, type, and current version for concurrency control and referential integrity.
 
 ## Projection and query flow
 
@@ -48,23 +59,23 @@ sequenceDiagram
     participant G as API Gateway
     participant Q as Query Service
 
-    K->>P: OrderCreated.v1 (at-least-once)
+    K->>P: OrderCreated.v1 (at least once)
     P->>QD: BEGIN
     P->>QD: check processed eventId
-    P->>QD: upsert denormalized order view
+    P->>QD: apply aggregateVersion to order view
     P->>QD: record processed eventId
     P->>QD: COMMIT
     Client->>G: GET /api/orders/{id}
     G->>Q: method-routed query
-    Q->>QD: query read model
+    Q->>QD: query denormalized model
     Q-->>Client: 200 + X-Data-Consistency: eventual
 ```
 
-Spring Kafka acknowledges the record only after the transactional listener returns. If database work succeeds but offset acknowledgement does not, Kafka redelivers and the processed-event check turns the replay into a no-op.
+The Kafka listener's database transaction includes both projection state and the processed-event record. The listener acknowledges only after that transaction returns. A redelivery after an acknowledgement failure becomes a no-op because `eventId` is already recorded.
 
 ## Event contract
 
-Every message uses an envelope such as:
+The JSONB stored in `order_events.payload` is the integration envelope emitted to Kafka:
 
 ```json
 {
@@ -83,43 +94,42 @@ Every message uses an envelope such as:
 }
 ```
 
-- `eventId` is the consumer idempotency key.
-- `eventType` carries a major contract version in its name.
-- `aggregateId` is the Kafka message key and partition-ordering boundary.
-- `aggregateVersion` protects projections from stale state transitions.
-- `occurredAt` describes domain-event time, not consumer processing time.
+- `eventId` is globally unique and is the consumer idempotency key.
+- `eventType` includes the major contract version.
+- `aggregateId` identifies the stream and Kafka partition key.
+- `aggregateVersion` is contiguous within the stream and guards projections from stale transitions.
+- `occurredAt` is domain-event time and remains part of the immutable envelope.
+- `payload` contains event-specific facts.
 
-The UUID `eventId` remains stable across publication retries and is the consumer deduplication key. Separately, PostgreSQL assigns an outbox `relay_sequence` when each row is inserted. The publisher orders its backlog by that database sequence rather than by `occurredAt`, so equal or backward-moving application clocks cannot reverse same-aggregate versions before Kafka receives them.
+Optional fields can be added compatibly. A breaking semantic or structural change creates a new event type such as `OrderCreated.v2`; consumers can support both versions during migration.
 
-Adding an optional field is backward compatible. A breaking payload change creates `OrderCreated.v2`; consumers can migrate while both event forms are published or translated.
+## Data ownership and rebuilds
 
-## Data ownership
+The command PostgreSQL instance owns event streams and command idempotency records. The query PostgreSQL instance owns a denormalized, disposable projection. Neither service reads or writes the other database.
 
-The command database owns normalized transactional state. The query database owns a disposable projection optimized for API reads. A query schema can be rebuilt by replaying the retained event stream; the command service never reads it as authoritative state.
-
-The two PostgreSQL instances are intentionally separate in Compose. Sharing one server is possible operationally, but credentials and schemas must still enforce ownership in a real deployment.
+The read model can be rebuilt by resetting its projection state and replaying `orders.events.v1` from the beginning while retained Kafka history is available. A longer-term rebuild strategy can republish the authoritative database event stream into a new topic or consumer group. That operational action must be controlled so a live projection is not accidentally mixed with a partial replay.
 
 ## Failure modes
 
 | Failure | Observable result | Recovery |
 | --- | --- | --- |
-| Kafka unavailable after command commit | Outbox row remains unpublished; query view lags | Scheduled publisher retries |
-| Publisher crashes after Kafka acknowledgement | Event can be duplicated | Consumer `processed_events` deduplicates |
-| Query database unavailable | Consumer does not acknowledge; record redelivers | Database recovery, then automatic retry |
-| Malformed or unsupported event | Two retries, then DLT | Alert, diagnose, correct, replay |
-| Query immediately follows command | Temporary `404` is possible | Poll `Location`, subscribe, or return write-side status in a richer API |
-| Concurrent create retry with the same key and payload | One database claimant creates the order; waiters replay it | Return `202` and `Idempotent-Replay: true` to waiters |
-| Idempotency key reused for a different payload | Stored request fingerprint differs | Return `409 Conflict` without another order or event |
-| Concurrent cancellation retry | PostgreSQL serializes the aggregate row; only the first transition emits | Return `202 CANCELLED` to every retry |
+| Kafka unavailable after command commit | Event remains authoritative in PostgreSQL; query model lags | Debezium resumes from its replication offset |
+| Debezium restarts after producing but before offset persistence | Event can be duplicated | `processed_events` deduplicates by `eventId` |
+| Query database unavailable | Listener transaction fails and record is not acknowledged | Database recovery followed by Kafka redelivery |
+| Malformed or unsupported event | Two retries, then DLT | Diagnose, correct or translate, and replay deliberately |
+| Query immediately follows command | Temporary `404` is possible | Poll the `Location` resource or expose write-side status separately |
+| Concurrent create retries with same key and payload | One claimant creates the stream; waiters replay it | Return one order ID and replay metadata |
+| Idempotency key reused with another payload | Stored fingerprint differs | Return `409 Conflict` without another event |
+| Concurrent cancellation retries | Metadata-row lock serializes replay and append | Only the first transition appends version 2 |
+| Attempted event update or delete | Database trigger aborts the statement | Correct with a compensating event, never history mutation |
 
-## Scaling path
+## Scaling and production path
 
-- Scale gateway instances statelessly.
-- Scale command instances; PostgreSQL uniqueness claims protect create idempotency, row locks serialize cancellation retries, optimistic versions remain a guard for other stale writes, and outbox locks protect relay batch selection.
-- Increase Kafka partitions and query consumers together. Keeping `orderId` as the key preserves per-order ordering.
-- Add read replicas or a specialized projection store without modifying command transactions.
-- Replace polling with Debezium when outbox throughput or latency justifies the additional platform component.
+- Scale gateway and command instances statelessly; PostgreSQL uniqueness and stream locks coordinate writes.
+- Increase Kafka partitions and query consumers together. Keeping `aggregateId` as the key preserves per-stream order.
+- Monitor replication-slot lag, Kafka consumer lag, connector/task state, DLT depth, command latency, and projection latency.
+- Use managed secrets, TLS, Kafka ACLs, and a least-privilege replication identity outside local development.
+- Add periodic aggregate snapshots only when measured replay cost requires them. Snapshots are derived caches, never replacements for history.
+- Add a schema registry or consumer-driven contract checks as the number of event producers and consumers grows.
 
-## Deliberate omissions
-
-Authentication, service discovery, Kubernetes manifests, a schema registry, and a tracing backend are intentionally outside this runnable reference. Adding all of them would obscure the CQRS mechanics. The gateway is the clear OAuth2/OIDC enforcement point, Actuator exposes observability integration points, and the event envelope is ready for schema-governance tooling.
+Authentication, service discovery, orchestration manifests, a tracing backend, and snapshotting are outside this compact implementation. The gateway is the natural OAuth2/OIDC enforcement point; Actuator exposes health and metrics integration points.

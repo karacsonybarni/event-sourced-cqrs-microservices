@@ -7,37 +7,27 @@ import java.util.UUID;
 
 import com.karacsonybarni.orders.command.domain.Order;
 import com.karacsonybarni.orders.command.domain.OrderLineItem;
-import com.karacsonybarni.orders.command.domain.OrderNotFoundException;
+import com.karacsonybarni.orders.command.eventstore.OrderEventStore;
 import com.karacsonybarni.orders.command.infrastructure.CommandRequest;
 import com.karacsonybarni.orders.command.infrastructure.CommandRequestRepository;
-import com.karacsonybarni.orders.command.infrastructure.OrderRepository;
-import com.karacsonybarni.orders.command.messaging.OrderEventFactory;
-import com.karacsonybarni.orders.command.outbox.OutboxEvent;
-import com.karacsonybarni.orders.command.outbox.OutboxEventRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class OrderCommandService {
 
-    private final OrderRepository orderRepository;
+    private final OrderEventStore eventStore;
     private final CommandRequestRepository commandRequestRepository;
-    private final OutboxEventRepository outboxEventRepository;
-    private final OrderEventFactory eventFactory;
     private final CreateOrderCommandFingerprint commandFingerprint;
     private final Clock clock;
 
     public OrderCommandService(
-            OrderRepository orderRepository,
+            OrderEventStore eventStore,
             CommandRequestRepository commandRequestRepository,
-            OutboxEventRepository outboxEventRepository,
-            OrderEventFactory eventFactory,
             CreateOrderCommandFingerprint commandFingerprint,
             Clock clock) {
-        this.orderRepository = orderRepository;
+        this.eventStore = eventStore;
         this.commandRequestRepository = commandRequestRepository;
-        this.outboxEventRepository = outboxEventRepository;
-        this.eventFactory = eventFactory;
         this.commandFingerprint = commandFingerprint;
         this.clock = clock;
     }
@@ -54,8 +44,7 @@ public class OrderCommandService {
                 throw new IdempotencyKeyConflictException(idempotencyKey);
             }
             UUID existingOrderId = existingRequest.getOrderId();
-            Order existingOrder = orderRepository.findById(existingOrderId)
-                    .orElseThrow(() -> new OrderNotFoundException(existingOrderId));
+            Order existingOrder = eventStore.load(existingOrderId);
             return CommandResult.replayed(existingOrder);
         }
 
@@ -63,19 +52,15 @@ public class OrderCommandService {
                 .map(item -> new OrderLineItem(item.productId(), item.quantity(), item.unitPrice()))
                 .toList();
         Order order = Order.create(orderId, command.customerId(), items, now);
-        orderRepository.save(order);
-        OutboxEvent event = eventFactory.orderCreated(order);
-        outboxEventRepository.save(event);
+        eventStore.create(order);
         return CommandResult.accepted(order);
     }
 
     @Transactional
     public CommandResult cancel(UUID orderId) {
-        Order order = orderRepository.findByIdForUpdate(orderId)
-                .orElseThrow(() -> new OrderNotFoundException(orderId));
+        Order order = eventStore.loadForUpdate(orderId);
         if (order.cancel(clock.instant())) {
-            OutboxEvent event = eventFactory.orderCancelled(order);
-            outboxEventRepository.save(event);
+            eventStore.append(order);
         }
         return CommandResult.accepted(order);
     }

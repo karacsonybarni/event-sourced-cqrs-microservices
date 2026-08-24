@@ -6,70 +6,46 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-import jakarta.persistence.CollectionTable;
-import jakarta.persistence.Column;
-import jakarta.persistence.ElementCollection;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.Table;
-import jakarta.persistence.Version;
+import com.karacsonybarni.orders.command.domain.event.OrderCancelledEvent;
+import com.karacsonybarni.orders.command.domain.event.OrderCreatedEvent;
+import com.karacsonybarni.orders.command.domain.event.OrderEvent;
 
-@Entity
-@Table(name = "orders")
-public class Order {
+public final class Order {
 
-    @Id
-    private UUID id;
+    private final UUID id;
+    private final List<OrderEvent> uncommittedEvents = new ArrayList<>();
 
-    @Column(name = "customer_id", nullable = false, length = 100)
     private String customerId;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 30)
     private OrderStatus status;
-
-    @Column(name = "total_amount", nullable = false, precision = 19, scale = 2)
     private BigDecimal totalAmount;
-
-    @ElementCollection(fetch = FetchType.LAZY)
-    @CollectionTable(name = "order_items", joinColumns = @JoinColumn(name = "order_id"))
-    private List<OrderLineItem> items = new ArrayList<>();
-
-    @Column(name = "created_at", nullable = false)
+    private List<OrderLineItem> items = List.of();
     private Instant createdAt;
-
-    @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+    private long version;
 
-    @Column(name = "event_sequence", nullable = false)
-    private long eventSequence;
-
-    @Version
-    @Column(name = "lock_version", nullable = false)
-    private long lockVersion;
-
-    protected Order() {
+    private Order(UUID id) {
+        this.id = id;
     }
 
     public static Order create(UUID id, String customerId, List<OrderLineItem> items, Instant now) {
         if (items.isEmpty()) {
             throw new IllegalArgumentException("An order requires at least one item");
         }
-        Order order = new Order();
-        order.id = id;
-        order.customerId = customerId;
-        order.items = new ArrayList<>(items);
-        order.totalAmount = items.stream()
+        BigDecimal totalAmount = items.stream()
                 .map(OrderLineItem::lineTotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        order.status = OrderStatus.CREATED;
-        order.createdAt = now;
-        order.updatedAt = now;
-        order.eventSequence = 1;
+        var order = new Order(id);
+        var event = new OrderCreatedEvent(customerId, totalAmount, items, now);
+        order.record(event);
+        return order;
+    }
+
+    public static Order rehydrate(UUID id, List<OrderEvent> history) {
+        if (history.isEmpty()) {
+            throw new OrderNotFoundException(id);
+        }
+        var order = new Order(id);
+        history.forEach(order::apply);
         return order;
     }
 
@@ -77,10 +53,41 @@ public class Order {
         if (status == OrderStatus.CANCELLED) {
             return false;
         }
-        status = OrderStatus.CANCELLED;
-        updatedAt = now;
-        eventSequence++;
+        record(new OrderCancelledEvent(now));
         return true;
+    }
+
+    private void record(OrderEvent event) {
+        apply(event);
+        uncommittedEvents.add(event);
+    }
+
+    private void apply(OrderEvent event) {
+        switch (event) {
+            case OrderCreatedEvent created -> applyCreated(created);
+            case OrderCancelledEvent cancelled -> applyCancelled(cancelled);
+        }
+        version++;
+    }
+
+    private void applyCreated(OrderCreatedEvent event) {
+        if (version != 0) {
+            throw new IllegalStateException("OrderCreated must be the first event in an order stream");
+        }
+        customerId = event.customerId();
+        status = OrderStatus.CREATED;
+        totalAmount = event.totalAmount();
+        items = List.copyOf(event.items());
+        createdAt = event.createdAt();
+        updatedAt = event.createdAt();
+    }
+
+    private void applyCancelled(OrderCancelledEvent event) {
+        if (status == null) {
+            throw new IllegalStateException("OrderCancelled requires an existing order");
+        }
+        status = OrderStatus.CANCELLED;
+        updatedAt = event.cancelledAt();
     }
 
     public UUID getId() {
@@ -100,7 +107,7 @@ public class Order {
     }
 
     public List<OrderLineItem> getItems() {
-        return List.copyOf(items);
+        return items;
     }
 
     public Instant getCreatedAt() {
@@ -111,7 +118,15 @@ public class Order {
         return updatedAt;
     }
 
-    public long getEventSequence() {
-        return eventSequence;
+    public long getVersion() {
+        return version;
+    }
+
+    public List<OrderEvent> getUncommittedEvents() {
+        return List.copyOf(uncommittedEvents);
+    }
+
+    public void markEventsCommitted() {
+        uncommittedEvents.clear();
     }
 }

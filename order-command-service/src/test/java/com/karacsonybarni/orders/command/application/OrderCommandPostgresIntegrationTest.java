@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -17,11 +17,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import com.karacsonybarni.orders.command.domain.OrderStatus;
+import com.karacsonybarni.orders.command.eventstore.OrderEventSerializer;
+import com.karacsonybarni.orders.command.eventstore.OrderEventStore;
 import com.karacsonybarni.orders.command.infrastructure.CommandRequestRepository;
-import com.karacsonybarni.orders.command.infrastructure.OrderRepository;
-import com.karacsonybarni.orders.command.messaging.OrderEventFactory;
-import com.karacsonybarni.orders.command.outbox.OutboxEvent;
-import com.karacsonybarni.orders.command.outbox.OutboxEventRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,14 +29,12 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
-import org.springframework.data.domain.PageRequest;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -50,7 +46,8 @@ import tools.jackson.databind.json.JsonMapper;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({
     OrderCommandService.class,
-    OrderEventFactory.class,
+    OrderEventStore.class,
+    OrderEventSerializer.class,
     CreateOrderCommandFingerprint.class,
     OrderCommandPostgresIntegrationTest.TestBeans.class
 })
@@ -67,19 +64,13 @@ class OrderCommandPostgresIntegrationTest {
     private OrderCommandService service;
 
     @Autowired
-    private OrderRepository orderRepository;
+    private OrderEventStore eventStore;
 
     @Autowired
     private CommandRequestRepository commandRequestRepository;
 
     @Autowired
-    private OutboxEventRepository outboxEventRepository;
-
-    @Autowired
     private JdbcTemplate jdbcTemplate;
-
-    @Autowired
-    private PlatformTransactionManager transactionManager;
 
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -90,12 +81,11 @@ class OrderCommandPostgresIntegrationTest {
 
     @BeforeEach
     void clearDatabase() {
-        jdbcTemplate.execute(
-                "TRUNCATE TABLE command_requests, outbox_events, order_items, orders RESTART IDENTITY CASCADE");
+        jdbcTemplate.execute("TRUNCATE TABLE command_requests, order_events, aggregate_streams CASCADE");
     }
 
     @Test
-    void concurrentCreateRetriesResolveToOneOrderAndOneOutboxEvent() throws Exception {
+    void concurrentCreateRetriesResolveToOneStreamAndOneEvent() throws Exception {
         var command = createCommand("customer-42", "keyboard", "49.90");
 
         List<CommandResult> results = runConcurrently(() -> service.create("concurrent-create", command));
@@ -103,73 +93,90 @@ class OrderCommandPostgresIntegrationTest {
         assertThat(results).extracting(CommandResult::orderId).containsOnly(results.getFirst().orderId());
         assertThat(results).filteredOn(result -> !result.replayed()).hasSize(1);
         assertThat(results).filteredOn(CommandResult::replayed).hasSize(CONCURRENT_CALLERS - 1);
-        assertThat(orderRepository.count()).isOne();
+        assertThat(countRows("aggregate_streams")).isOne();
         assertThat(commandRequestRepository.count()).isOne();
-        assertThat(outboxEventRepository.count()).isOne();
+        assertThat(countRows("order_events")).isOne();
     }
 
     @Test
     void repeatedIdempotencyKeyRejectsDifferentCommand() {
-        CreateOrderCommand firstCommand = createCommand("first-customer", "keyboard", "49.90");
-        service.create("payload-bound-key", firstCommand);
+        service.create("payload-bound-key", createCommand("first-customer", "keyboard", "49.90"));
         CreateOrderCommand differentCommand = createCommand("different-customer", "monitor", "299.90");
 
         assertThatThrownBy(() -> service.create("payload-bound-key", differentCommand))
                 .isInstanceOf(IdempotencyKeyConflictException.class)
                 .hasMessageContaining("payload-bound-key");
 
-        assertThat(orderRepository.count()).isOne();
+        assertThat(countRows("aggregate_streams")).isOne();
         assertThat(commandRequestRepository.count()).isOne();
-        assertThat(outboxEventRepository.count()).isOne();
+        assertThat(countRows("order_events")).isOne();
     }
 
     @Test
-    void concurrentCancellationRetriesCreateOneCancellationEvent() throws Exception {
-        CreateOrderCommand command = createCommand("customer-42", "keyboard", "49.90");
-        CommandResult created = service.create("order-to-cancel", command);
+    void concurrentCancellationRetriesAppendOneCancellationEvent() throws Exception {
+        CommandResult created = service.create(
+                "order-to-cancel", createCommand("customer-42", "keyboard", "49.90"));
 
         List<CommandResult> results = runConcurrently(() -> service.cancel(created.orderId()));
 
         assertThat(results).extracting(CommandResult::status).containsOnly(OrderStatus.CANCELLED);
-        assertThat(orderRepository.findById(created.orderId())).hasValueSatisfying(order -> {
+        assertThat(eventStore.load(created.orderId())).satisfies(order -> {
             assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
-            assertThat(order.getEventSequence()).isEqualTo(2);
+            assertThat(order.getVersion()).isEqualTo(2);
+            assertThat(order.getUncommittedEvents()).isEmpty();
         });
-        assertThat(outboxEventRepository.count()).isEqualTo(2);
+        assertThat(countRows("order_events")).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT current_version FROM aggregate_streams WHERE aggregate_id = ?",
+                Long.class,
+                created.orderId())).isEqualTo(2);
     }
 
     @Test
-    void unpublishedEventsUseDatabaseRelaySequenceWhenTimestampsAreInvertedOrEqual() {
-        UUID firstEventId = UUID.randomUUID();
-        UUID secondEventId = UUID.randomUUID();
-        UUID thirdEventId = UUID.randomUUID();
-        Instant later = NOW.plusSeconds(60);
-        var first = outboxEvent(firstEventId, later);
-        var second = outboxEvent(secondEventId, NOW);
-        var third = outboxEvent(thirdEventId, NOW);
-        var transaction = new TransactionTemplate(transactionManager);
-        var firstPage = PageRequest.of(0, 10);
+    void storedEventsUseContiguousVersionsAndVersionedEnvelopes() {
+        CommandResult created = service.create(
+                "ordered-events", createCommand("customer-42", "keyboard", "49.90"));
+        service.cancel(created.orderId());
 
-        List<UUID> eventIds = transaction.execute(status -> {
-            outboxEventRepository.saveAndFlush(first);
-            outboxEventRepository.saveAndFlush(second);
-            outboxEventRepository.saveAndFlush(third);
-            return outboxEventRepository.findUnpublished(firstPage).stream()
-                    .map(OutboxEvent::getEventId)
-                    .toList();
-        });
+        List<Map<String, Object>> events = jdbcTemplate.queryForList("""
+                SELECT aggregate_version, event_type, payload
+                FROM order_events
+                WHERE aggregate_id = ?
+                ORDER BY aggregate_version
+                """, created.orderId());
 
-        assertThat(eventIds).containsExactly(firstEventId, secondEventId, thirdEventId);
+        assertThat(events).extracting(event -> event.get("aggregate_version")).containsExactly(1L, 2L);
+        assertThat(events).extracting(event -> event.get("event_type"))
+                .containsExactly("OrderCreated.v1", "OrderCancelled.v1");
+        assertThat(events).allSatisfy(event -> assertThat(event.get("payload").toString())
+                .contains("aggregateVersion", "eventId", "payload"));
+    }
+
+    @Test
+    void databaseRejectsUpdatesAndDeletesFromEventStore() {
+        CommandResult created = service.create(
+                "append-only", createCommand("customer-42", "keyboard", "49.90"));
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE order_events SET event_type = 'Changed' WHERE aggregate_id = ?",
+                created.orderId()))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("order_events is append-only");
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "DELETE FROM order_events WHERE aggregate_id = ?",
+                created.orderId()))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("order_events is append-only");
+        assertThat(countRows("order_events")).isOne();
+    }
+
+    private long countRows(String table) {
+        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + table, Long.class);
     }
 
     private static CreateOrderCommand createCommand(String customerId, String productId, String unitPrice) {
         var item = new CreateOrderCommand.Item(productId, 1, new BigDecimal(unitPrice));
         return new CreateOrderCommand(customerId, List.of(item));
-    }
-
-    private static OutboxEvent outboxEvent(UUID eventId, Instant occurredAt) {
-        return new OutboxEvent(
-                eventId, UUID.randomUUID(), OrderEventFactory.ORDER_CREATED, "{}", occurredAt);
     }
 
     private static <T> List<T> runConcurrently(Callable<T> operation) throws Exception {
