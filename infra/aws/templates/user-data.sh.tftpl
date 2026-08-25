@@ -71,6 +71,7 @@ Requires=docker.service
 Type=oneshot
 RemainAfterExit=yes
 TimeoutStartSec=1800
+Environment=HOME=/root
 ExecStart=/usr/local/bin/deploy-event-sourced-cqrs
 
 [Install]

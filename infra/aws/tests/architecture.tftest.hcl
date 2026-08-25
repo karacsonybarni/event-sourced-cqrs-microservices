@@ -87,6 +87,11 @@ run "cost_controlled_cloud_topology" {
   }
 
   assert {
+    condition     = strcontains(aws_instance.platform.user_data, "Environment=HOME=/root")
+    error_message = "The systemd deployment service must provide the home directory required by Maven Wrapper."
+  }
+
+  assert {
     condition     = aws_vpc_security_group_ingress_rule.gateway.from_port == 8080 && aws_vpc_security_group_ingress_rule.gateway.to_port == 8080
     error_message = "Only the application gateway port may be exposed by the instance security group."
   }
