@@ -82,6 +82,11 @@ run "cost_controlled_cloud_topology" {
   }
 
   assert {
+    condition     = !can(regex("(?m)^dnf install[^\\n]*[[:space:]]curl([[:space:]]|$)", aws_instance.platform.user_data))
+    error_message = "Amazon Linux already provides curl-minimal; installing curl would make cloud-init fail on the package conflict."
+  }
+
+  assert {
     condition     = aws_vpc_security_group_ingress_rule.gateway.from_port == 8080 && aws_vpc_security_group_ingress_rule.gateway.to_port == 8080
     error_message = "Only the application gateway port may be exposed by the instance security group."
   }

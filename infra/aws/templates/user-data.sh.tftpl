@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 exec > >(tee /var/log/event-sourced-cqrs-bootstrap.log | logger -t event-sourced-cqrs-bootstrap -s 2>/dev/console) 2>&1
 
-dnf install --assumeyes curl docker git jq java-21-amazon-corretto-headless openssl util-linux
+dnf install --assumeyes docker git jq java-21-amazon-corretto-headless openssl util-linux
 systemctl enable --now docker
 
 compose_asset="docker-compose-linux-x86_64"
