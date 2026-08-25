@@ -8,7 +8,7 @@ services:
       options:
         awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
         awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
-        awslogs-stream-prefix: discovery-server
+        tag: "{{.Name}}"
 
   command-db:
     ports: !reset []
@@ -20,7 +20,7 @@ services:
       options:
         awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
         awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
-        awslogs-stream-prefix: command-db
+        tag: "{{.Name}}"
 
   query-db:
     ports: !reset []
@@ -32,7 +32,7 @@ services:
       options:
         awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
         awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
-        awslogs-stream-prefix: query-db
+        tag: "{{.Name}}"
 
   kafka:
     ports: !reset []
@@ -42,7 +42,7 @@ services:
       options:
         awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
         awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
-        awslogs-stream-prefix: kafka
+        tag: "{{.Name}}"
 
   kafka-init:
     mem_limit: 256m
@@ -51,7 +51,7 @@ services:
       options:
         awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
         awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
-        awslogs-stream-prefix: kafka-init
+        tag: "{{.Name}}"
 
   debezium:
     ports: !override
@@ -64,7 +64,7 @@ services:
       options:
         awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
         awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
-        awslogs-stream-prefix: debezium
+        tag: "{{.Name}}"
 
   debezium-init:
     mem_limit: 128m
@@ -73,7 +73,7 @@ services:
       options:
         awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
         awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
-        awslogs-stream-prefix: debezium-init
+        tag: "{{.Name}}"
 
   order-command-service:
     ports: !reset []
@@ -85,7 +85,7 @@ services:
       options:
         awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
         awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
-        awslogs-stream-prefix: order-command-service
+        tag: "{{.Name}}"
 
   order-query-service:
     ports: !reset []
@@ -97,7 +97,7 @@ services:
       options:
         awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
         awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
-        awslogs-stream-prefix: order-query-service
+        tag: "{{.Name}}"
 
   api-gateway:
     environment:
@@ -117,4 +117,4 @@ services:
       options:
         awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
         awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
-        awslogs-stream-prefix: api-gateway
+        tag: "{{.Name}}"

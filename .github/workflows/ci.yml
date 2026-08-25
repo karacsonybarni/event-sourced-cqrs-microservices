@@ -61,6 +61,10 @@ jobs:
       - name: Validate Docker Compose model
         run: |
           docker compose config --quiet
+          if grep --quiet 'awslogs-stream-prefix' compose.cloud.yml; then
+            echo 'awslogs-stream-prefix is an ECS option and is unsupported by the Docker Engine awslogs driver.' >&2
+            exit 1
+          fi
           COMMAND_DB_PASSWORD=validation \
           QUERY_DB_PASSWORD=validation \
           AWS_REGION=eu-central-1 \
