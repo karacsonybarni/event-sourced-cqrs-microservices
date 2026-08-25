@@ -66,6 +66,26 @@ variable "github_repository" {
   }
 }
 
+variable "github_repository_owner_id" {
+  description = "Immutable GitHub numeric owner ID included in the repository OIDC subject."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repository_owner_id))
+    error_message = "github_repository_owner_id must be a numeric GitHub account ID."
+  }
+}
+
+variable "github_repository_id" {
+  description = "Immutable GitHub numeric repository ID included in the repository OIDC subject."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repository_id))
+    error_message = "github_repository_id must be a numeric GitHub repository ID."
+  }
+}
+
 variable "github_environment" {
   description = "GitHub environment whose OIDC subject can deploy through Systems Manager."
   type        = string

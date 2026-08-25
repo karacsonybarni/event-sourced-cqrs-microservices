@@ -45,7 +45,7 @@ Prerequisites:
 - Terraform 1.15.x;
 - an authenticated GitHub CLI session with repository and workflow access.
 
-No AWS access key is stored in GitHub. Terraform creates a GitHub OIDC trust restricted to the repository's `cloud` environment, and the workflow receives short-lived credentials for one Systems Manager deployment command.
+No AWS access key is stored in GitHub. Terraform creates a GitHub OIDC trust restricted to the repository's immutable numeric identity and `cloud` environment, and the workflow receives short-lived credentials for one Systems Manager deployment command. The provisioner reads the owner and repository IDs from GitHub, configures the matching AWS trust first, and then explicitly enables GitHub's immutable OIDC subject format.
 
 For an AWS account that uses normal Console credentials, current AWS CLI releases can establish the required temporary local session with `aws login --region eu-central-1`; no long-lived access key is needed.
 

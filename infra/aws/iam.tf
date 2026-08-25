@@ -52,7 +52,8 @@ resource "aws_iam_openid_connect_provider" "github" {
 
 locals {
   github_oidc_provider_arn = var.github_oidc_provider_arn != null ? var.github_oidc_provider_arn : aws_iam_openid_connect_provider.github[0].arn
-  github_oidc_subject      = "repo:${var.github_repository}:environment:${var.github_environment}"
+  github_repository_parts  = split("/", var.github_repository)
+  github_oidc_subject      = "repo:${local.github_repository_parts[0]}@${var.github_repository_owner_id}/${local.github_repository_parts[1]}@${var.github_repository_id}:environment:${var.github_environment}"
 }
 
 data "aws_iam_policy_document" "github_assume_role" {

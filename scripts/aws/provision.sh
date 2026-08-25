@@ -21,6 +21,9 @@ done
 aws sts get-caller-identity >/dev/null
 gh auth status --hostname github.com >/dev/null
 
+github_repository_owner_id="$(gh api "repos/${github_repository}" --jq '.owner.id')"
+github_repository_id="$(gh api "repos/${github_repository}" --jq '.id')"
+
 verify_aws_service_access() {
   local service_name="$1"
   shift
@@ -55,6 +58,8 @@ main_apply_arguments=(
   -input=false
   -var "aws_region=${aws_region}"
   -var "github_repository=${github_repository}"
+  -var "github_repository_owner_id=${github_repository_owner_id}"
+  -var "github_repository_id=${github_repository_id}"
   -var "github_environment=${github_environment}"
 )
 if [[ -n "${BUDGET_ALERT_EMAIL:-}" ]]; then
@@ -66,6 +71,14 @@ fi
 main_apply_arguments+=("${terraform_apply_arguments[@]}")
 
 terraform -chdir="${repository_root}/infra/aws" apply "${main_apply_arguments[@]}"
+
+gh api \
+  --method PUT \
+  -H "X-GitHub-Api-Version: 2026-03-10" \
+  "repos/${github_repository}/actions/oidc/customization/sub" \
+  -F use_default=true \
+  -F use_immutable_subject=true \
+  --silent
 
 aws_account_id="$(terraform -chdir="${repository_root}/infra/aws" output -raw aws_account_id)"
 deployment_role_arn="$(terraform -chdir="${repository_root}/infra/aws" output -raw deployment_role_arn)"

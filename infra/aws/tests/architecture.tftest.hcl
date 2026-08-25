@@ -45,7 +45,7 @@ mock_provider "aws" {
     target          = data.aws_iam_policy_document.github_assume_role
     override_during = plan
     values = {
-      json = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com\"},\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:sub\":\"repo:karacsonybarni/event-sourced-cqrs-microservices:environment:cloud\"}}}]}"
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com\"},\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:sub\":\"repo:karacsonybarni@14146083/event-sourced-cqrs-microservices@1343825530:environment:cloud\"}}}]}"
     }
   }
 
@@ -60,6 +60,11 @@ mock_provider "aws" {
 
 run "cost_controlled_cloud_topology" {
   command = plan
+
+  variables {
+    github_repository_owner_id = "14146083"
+    github_repository_id       = "1343825530"
+  }
 
   assert {
     condition     = aws_instance.platform.instance_type == "m7i-flex.large"
@@ -87,7 +92,7 @@ run "cost_controlled_cloud_topology" {
   }
 
   assert {
-    condition     = local.github_oidc_subject == "repo:karacsonybarni/event-sourced-cqrs-microservices:environment:cloud"
-    error_message = "The deployment role must trust only the repository's cloud environment."
+    condition     = local.github_oidc_subject == "repo:karacsonybarni@14146083/event-sourced-cqrs-microservices@1343825530:environment:cloud"
+    error_message = "The deployment role must trust only the immutable repository identity and cloud environment."
   }
 }
