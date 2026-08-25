@@ -2,6 +2,8 @@
 
 This deployment keeps the complete application topology intact while minimizing fixed cloud cost. Terraform provisions an AWS HTTPS entry point, networking, identity, compute, remote state, logs, alarms, and a monthly budget. Docker Compose runs the two PostgreSQL databases, Kafka, Debezium, Eureka, the gateway, and two replicas of each business service on one measured eight-GiB EC2 instance.
 
+Current public API: [https://n6jxpgtbrc.execute-api.eu-central-1.amazonaws.com/](https://n6jxpgtbrc.execute-api.eu-central-1.amazonaws.com/)
+
 ```mermaid
 flowchart TB
     Client([Client]) -->|HTTPS| HttpApi[Amazon API Gateway<br/>HTTP API + throttling]

@@ -72,6 +72,8 @@ make down
 
 The repository includes a cost-controlled AWS deployment with Terraform, Amazon API Gateway, EC2, VPC networking, IAM, Systems Manager, CloudWatch, S3 remote state, GitHub Actions OIDC, automated delivery, and public end-to-end verification. It preserves the complete multi-replica Kafka and Debezium topology while keeping the economical environment honest about its single-host availability boundary.
 
+Public API: [https://n6jxpgtbrc.execute-api.eu-central-1.amazonaws.com/](https://n6jxpgtbrc.execute-api.eu-central-1.amazonaws.com/)
+
 See [AWS cloud deployment](docs/aws-deployment.md) for the architecture, provisioning command, security model, operations, cost controls, and teardown procedure. [ADR-003](docs/adr/003-cost-optimized-aws-deployment.md) records why the economical topology uses one deployment host and how it evolves into managed production services.
 
 ## Try the API manually
