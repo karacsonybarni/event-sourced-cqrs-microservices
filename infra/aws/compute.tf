@@ -14,6 +14,8 @@ resource "aws_instance" "platform" {
 
   user_data = templatefile("${path.module}/templates/user-data.sh.tftpl", {
     aws_region               = var.aws_region
+    buildx_sha256            = var.buildx_sha256
+    buildx_version           = var.buildx_version
     compose_version          = var.compose_version
     container_log_group_name = aws_cloudwatch_log_group.containers.name
     repository_ref           = var.repository_ref

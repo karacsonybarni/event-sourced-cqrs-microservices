@@ -110,6 +110,28 @@ variable "compose_version" {
   }
 }
 
+variable "buildx_version" {
+  description = "Pinned Docker Buildx plugin version required by Docker Compose builds."
+  type        = string
+  default     = "v0.36.1"
+
+  validation {
+    condition     = can(regex("^v[0-9]+\\.[0-9]+\\.[0-9]+$", var.buildx_version))
+    error_message = "buildx_version must be a complete vMAJOR.MINOR.PATCH release."
+  }
+}
+
+variable "buildx_sha256" {
+  description = "SHA-256 digest of the pinned Linux AMD64 Docker Buildx binary."
+  type        = string
+  default     = "48af8a397ebd60178778bf63611dbcebe5f5e7a9be90eb9147b24b9587455778"
+
+  validation {
+    condition     = can(regex("^[a-f0-9]{64}$", var.buildx_sha256))
+    error_message = "buildx_sha256 must be a lowercase SHA-256 digest."
+  }
+}
+
 variable "monthly_budget_usd" {
   description = "Monthly cost budget used as an explicit cost-control signal."
   type        = number

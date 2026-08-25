@@ -92,6 +92,11 @@ run "cost_controlled_cloud_topology" {
   }
 
   assert {
+    condition     = strcontains(aws_instance.platform.user_data, "docker-buildx") && strcontains(aws_instance.platform.user_data, var.buildx_sha256)
+    error_message = "The bootstrap must install the checksum-verified Buildx plugin required by Docker Compose."
+  }
+
+  assert {
     condition     = aws_vpc_security_group_ingress_rule.gateway.from_port == 8080 && aws_vpc_security_group_ingress_rule.gateway.to_port == 8080
     error_message = "Only the application gateway port may be exposed by the instance security group."
   }

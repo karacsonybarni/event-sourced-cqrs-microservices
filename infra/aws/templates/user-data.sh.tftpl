@@ -20,6 +20,14 @@ sha256sum --check "$${compose_asset}.sha256"
 install --directory --mode 0755 /usr/local/lib/docker/cli-plugins
 install --mode 0755 "$${compose_asset}" /usr/local/lib/docker/cli-plugins/docker-compose
 
+buildx_asset="buildx-${buildx_version}.linux-amd64"
+curl --fail --silent --show-error --location \
+  "https://github.com/docker/buildx/releases/download/${buildx_version}/$${buildx_asset}" \
+  --output "$${compose_download_dir}/$${buildx_asset}"
+printf '%s  %s\n' "${buildx_sha256}" "$${buildx_asset}" | sha256sum --check
+install --mode 0755 "$${buildx_asset}" /usr/local/lib/docker/cli-plugins/docker-buildx
+docker buildx version
+
 install --directory --mode 0755 /opt/event-sourced-cqrs
 install --directory --mode 0700 /etc/event-sourced-cqrs
 
