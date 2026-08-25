@@ -22,13 +22,13 @@ variable "environment" {
 }
 
 variable "instance_type" {
-  description = "Eight-GiB x86 instance used for the complete single-node platform."
+  description = "Free-plan-eligible eight-GiB x86 instance used for the complete single-node platform."
   type        = string
-  default     = "t3.large"
+  default     = "m7i-flex.large"
 
   validation {
-    condition     = contains(["t3.large", "t3a.large"], var.instance_type)
-    error_message = "instance_type must provide the tested x86 two-vCPU/eight-GiB capacity."
+    condition     = var.instance_type == "m7i-flex.large"
+    error_message = "instance_type must use the tested Free-plan-eligible x86 two-vCPU/eight-GiB shape."
   }
 }
 

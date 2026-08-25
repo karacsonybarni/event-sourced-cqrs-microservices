@@ -8,7 +8,7 @@ flowchart TB
     HttpApi -->|HTTP :8080| Gateway[Spring Cloud Gateway]
 
     subgraph VPC[AWS VPC]
-        subgraph Host[EC2 t3.large · encrypted gp3]
+        subgraph Host[EC2 m7i-flex.large · encrypted gp3]
             Gateway --> Registry[Eureka]
             Gateway --> Commands[Command service ×2]
             Gateway --> Queries[Query service ×2]
@@ -28,7 +28,7 @@ flowchart TB
 
 ## Why one deployment host
 
-The live containers use approximately 3.5 GiB before operating-system, build, and Docker overhead. An eight-GiB burstable instance is the smallest tested shape with enough headroom for compilation, Kafka, Debezium, two databases, and four replicated Spring services. Standard CPU credits prevent unlimited-mode surplus charges.
+The live containers use approximately 3.5 GiB before operating-system, build, and Docker overhead. The Free-plan-eligible, eight-GiB `m7i-flex.large` instance is the smallest tested shape with enough headroom for compilation, Kafka, Debezium, two databases, and four replicated Spring services.
 
 This is a cost-optimized environment, not a claim of infrastructure high availability. It proves the same event sourcing, CDC, consumer idempotency, discovery, and replica behavior as the local topology. A production topology would place stateless services on ECS or EKS, use managed multi-AZ databases and Kafka, and run the registry redundantly or replace it with platform-native discovery.
 

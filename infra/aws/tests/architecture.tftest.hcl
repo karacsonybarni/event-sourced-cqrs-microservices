@@ -62,13 +62,8 @@ run "cost_controlled_cloud_topology" {
   command = plan
 
   assert {
-    condition     = aws_instance.platform.instance_type == "t3.large"
-    error_message = "The default instance must match the measured eight-GiB runtime capacity."
-  }
-
-  assert {
-    condition     = aws_instance.platform.credit_specification[0].cpu_credits == "standard"
-    error_message = "Burstable compute must not create unlimited-credit charges."
+    condition     = aws_instance.platform.instance_type == "m7i-flex.large"
+    error_message = "The default instance must match the Free-plan-eligible measured eight-GiB runtime capacity."
   }
 
   assert {

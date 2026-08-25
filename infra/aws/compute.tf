@@ -20,10 +20,6 @@ resource "aws_instance" "platform" {
     repository_url           = var.repository_url
   })
 
-  credit_specification {
-    cpu_credits = "standard"
-  }
-
   metadata_options {
     http_endpoint               = "enabled"
     http_protocol_ipv6          = "disabled"
