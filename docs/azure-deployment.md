@@ -4,6 +4,10 @@
 
 This deployment keeps the complete event-sourced CQRS topology available on Azure while the runtime remains economical and reproducible. Terraform provisions one hardened Linux VM, a stable public DNS name, HTTPS termination, versioned remote state, a cost budget, and a short-lived GitHub OIDC delivery identity.
 
+Verified public endpoint: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
+
+The deployment runs in Poland Central. Its public event-sourced create, query, and cancel flow, Debezium connector, two command replicas, two query replicas, single-replica failover, HTTPS certificate, management-port isolation, and Terraform state have been verified against the deployed environment.
+
 The tested `Standard_B2as_v2` VM has two vCPUs and 8 GiB of memory. It is not one of Azure's 12-month free VM shapes; the Azure Free Account's promotional credit funds it. `scripts/azure/verify-free-plan.sh` blocks provisioning unless the subscription is `Enabled` and its spending limit is `On`, so Azure stops resources instead of charging a payment method when included credit is exhausted. The public service therefore remains available only while promotional credit or another credit-backed allowance remains active.
 
 The design intentionally avoids Marketplace products and managed resources with fixed hourly platform fees. A resource-group budget adds an early cost signal but is not a spending cap; the subscription spending limit is the no-charge boundary.
@@ -68,13 +72,14 @@ BUDGET_ALERT_EMAIL='name@example.com' ./scripts/azure/provision.sh
 Set `AUTO_APPROVE=true` only in a controlled automation context after reviewing the plan. The provisioner:
 
 1. verifies the subscription state and spending limit;
-2. creates a private, versioned Azure Storage backend;
-3. waits for the Blob data-role assignment to propagate, then initializes remote state;
-4. provisions networking, the VM, DNS, boot diagnostics, and the cost budget;
-5. creates an Entra application with an immutable GitHub environment subject;
-6. grants only VM read and Run Command permissions;
-7. configures GitHub environment variables without long-lived Azure secrets; and
-8. starts the Azure deployment workflow.
+2. registers only the Azure resource providers required by the deployment;
+3. creates a private, versioned Azure Storage backend;
+4. waits for the Blob data-role assignment to propagate, then initializes remote state;
+5. provisions networking, the VM, DNS, boot diagnostics, and the cost budget;
+6. creates an Entra application with an immutable GitHub environment subject;
+7. grants only VM read and Run Command permissions;
+8. configures GitHub environment variables without long-lived Azure secrets; and
+9. starts the Azure deployment workflow.
 
 The recovery SSH private key is generated under `AZURE_CONFIG_DIR` and is never written to the repository or Terraform state. Port 22 remains closed.
 

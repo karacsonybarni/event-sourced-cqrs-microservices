@@ -73,6 +73,8 @@ make down
 
 The repository includes a credit-protected Azure deployment with Terraform, Azure Virtual Network, a hardened Linux VM, private versioned Blob state, Entra workload identity federation, GitHub Actions OIDC, Azure Run Command, boot diagnostics, a resource-group budget, stable DNS, and Caddy-managed HTTPS. It preserves the complete multi-replica Kafka and Debezium topology and refuses to provision unless the Azure subscription is enabled with spending protection set to `On`.
 
+Verified public API: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
+
 See [Azure cloud deployment](docs/azure-deployment.md) for the architecture, provisioning command, security model, cost boundary, delivery flow, operations, and teardown procedure. [ADR-004](docs/adr/004-credit-protected-azure-deployment.md) records why the complete topology uses promotional credit on one 8-GiB VM instead of the undersized 12-month free VM shapes.
 
 ## Preserved AWS deployment
