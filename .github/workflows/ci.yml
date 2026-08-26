@@ -28,8 +28,8 @@ jobs:
         run: >-
           docker run --rm -v "$PWD:/workspace"
           aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
-          config --skip-version-check --severity HIGH,CRITICAL --exit-code 1 /workspace/infra/aws
-      - name: Validate state bootstrap
+          config --skip-version-check --severity HIGH,CRITICAL --exit-code 1 /workspace/infra
+      - name: Validate AWS state bootstrap
         run: |
           terraform -chdir=infra/aws/bootstrap init -backend=false -input=false
           terraform -chdir=infra/aws/bootstrap validate
@@ -39,6 +39,16 @@ jobs:
           terraform -chdir=infra/aws init -backend=false -input=false
           terraform -chdir=infra/aws validate
           terraform -chdir=infra/aws test
+      - name: Validate Azure state bootstrap
+        run: |
+          terraform -chdir=infra/azure/bootstrap init -backend=false -input=false
+          terraform -chdir=infra/azure/bootstrap validate
+          terraform -chdir=infra/azure/bootstrap test
+      - name: Validate Azure runtime infrastructure
+        run: |
+          terraform -chdir=infra/azure init -backend=false -input=false
+          terraform -chdir=infra/azure validate
+          terraform -chdir=infra/azure test
 
   build:
     runs-on: ubuntu-latest
@@ -70,12 +80,17 @@ jobs:
           AWS_REGION=eu-central-1 \
           CLOUDWATCH_LOG_GROUP=/validation/containers \
             docker compose --file compose.yml --file compose.cloud.yml config --quiet
+          COMMAND_DB_PASSWORD=validation \
+          QUERY_DB_PASSWORD=validation \
+          PUBLIC_HOST=validation.example.com \
+          ACME_EMAIL=validation@example.com \
+            docker compose --file compose.yml --file compose.azure.yml config --quiet
       - name: Validate shell scripts
         run: |
-          bash -n scripts/*.sh scripts/aws/*.sh
+          bash -n scripts/*.sh scripts/aws/*.sh scripts/azure/*.sh
           docker run --rm -v "$PWD:/mnt" \
             koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d \
-            scripts/*.sh scripts/aws/*.sh
+            scripts/*.sh scripts/aws/*.sh scripts/azure/*.sh
 
   integration:
     needs: build

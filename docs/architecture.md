@@ -138,11 +138,13 @@ The read model can be rebuilt by resetting its projection state and replaying `o
 | One command or query replica stops | Eureka lease expires and the gateway refreshes its instance list | Traffic continues through the surviving replica |
 | Registry unavailable after clients have cached instances | Existing cache can serve temporarily; topology changes are not discovered | Restore the registry; run it redundantly outside local development |
 
-## Scaling and production path
+## Cloud deployments and production path
+
+The credit-protected Azure environment also packages the complete topology onto one encrypted two-vCPU/eight-GiB VM. It adds a stable Azure DNS name, Caddy-managed HTTPS, private versioned Blob state, an Entra workload identity federated to GitHub Actions, Azure Run Command, boot diagnostics, and an explicit budget. Provisioning is allowed only while the Azure subscription is enabled with its spending limit set to `On`. See [Azure cloud deployment](azure-deployment.md) and [ADR-004](adr/004-credit-protected-azure-deployment.md).
 
 The cost-optimized AWS environment packages the complete topology onto one encrypted EC2 host, places an API Gateway HTTP API at the public boundary, and uses Terraform, S3 remote state, GitHub OIDC, Systems Manager, CloudWatch, and explicit budgets for repeatable operations. Container memory limits reflect the measured runtime footprint, internal ports remain private, and the management endpoint is separated from public gateway traffic. See [AWS cloud deployment](aws-deployment.md) and [ADR-003](adr/003-cost-optimized-aws-deployment.md).
 
-That environment demonstrates application-level replica behavior but deliberately does not describe one host as highly available. The production evolution is:
+Both economical environments demonstrate application-level replica behavior but deliberately do not describe one host as highly available. The production evolution is:
 
 - Scale gateway and command instances statelessly; PostgreSQL uniqueness and stream locks coordinate writes.
 - Increase Kafka partitions and query consumers together. Keeping `aggregateId` as the key preserves per-stream order.

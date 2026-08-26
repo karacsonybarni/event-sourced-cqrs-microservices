@@ -1,6 +1,7 @@
 # Event-Sourced CQRS Microservices
 
 [![CI](https://github.com/karacsonybarni/event-sourced-cqrs-microservices/actions/workflows/ci.yml/badge.svg)](https://github.com/karacsonybarni/event-sourced-cqrs-microservices/actions/workflows/ci.yml)
+[![Azure deployment](https://github.com/karacsonybarni/event-sourced-cqrs-microservices/actions/workflows/deploy-azure.yml/badge.svg)](https://github.com/karacsonybarni/event-sourced-cqrs-microservices/actions/workflows/deploy-azure.yml)
 [![AWS deployment](https://github.com/karacsonybarni/event-sourced-cqrs-microservices/actions/workflows/deploy-aws.yml/badge.svg)](https://github.com/karacsonybarni/event-sourced-cqrs-microservices/actions/workflows/deploy-aws.yml)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-6DB33F?logo=springboot)](https://spring.io/projects/spring-boot)
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk)](https://adoptium.net/)
@@ -68,11 +69,17 @@ Stop the stack and remove its local volumes with:
 make down
 ```
 
-## Deploy to AWS
+## Deploy to Azure
 
-The repository includes a cost-controlled AWS deployment with Terraform, Amazon API Gateway, EC2, VPC networking, IAM, Systems Manager, CloudWatch, S3 remote state, GitHub Actions OIDC, automated delivery, and public end-to-end verification. It preserves the complete multi-replica Kafka and Debezium topology while keeping the economical environment honest about its single-host availability boundary.
+The repository includes a credit-protected Azure deployment with Terraform, Azure Virtual Network, a hardened Linux VM, private versioned Blob state, Entra workload identity federation, GitHub Actions OIDC, Azure Run Command, boot diagnostics, a resource-group budget, stable DNS, and Caddy-managed HTTPS. It preserves the complete multi-replica Kafka and Debezium topology and refuses to provision unless the Azure subscription is enabled with spending protection set to `On`.
 
-Public API: [https://n6jxpgtbrc.execute-api.eu-central-1.amazonaws.com/](https://n6jxpgtbrc.execute-api.eu-central-1.amazonaws.com/)
+See [Azure cloud deployment](docs/azure-deployment.md) for the architecture, provisioning command, security model, cost boundary, delivery flow, operations, and teardown procedure. [ADR-004](docs/adr/004-credit-protected-azure-deployment.md) records why the complete topology uses promotional credit on one 8-GiB VM instead of the undersized 12-month free VM shapes.
+
+## Preserved AWS deployment
+
+The AWS deployment remains fully described and reproducible with Terraform, Amazon API Gateway, EC2, VPC networking, IAM, Systems Manager, CloudWatch, S3 remote state, GitHub Actions OIDC, automated delivery, and public end-to-end verification. Its remote state and runtime resources are intentionally preserved while AWS automatic delivery is paused.
+
+Last assigned API endpoint: `https://n6jxpgtbrc.execute-api.eu-central-1.amazonaws.com/`
 
 See [AWS cloud deployment](docs/aws-deployment.md) for the architecture, provisioning command, security model, operations, cost controls, and teardown procedure. [ADR-003](docs/adr/003-cost-optimized-aws-deployment.md) records why the economical topology uses one deployment host and how it evolves into managed production services.
 
@@ -152,6 +159,7 @@ The test suite covers aggregate replay, versioned serialization, append-only dat
 - springdoc-openapi 3.1.0
 - Micrometer Actuator and Prometheus metrics
 - Maven Wrapper, Docker Compose, GitHub Actions, Dependabot
+- Terraform, Azure Virtual Network, Linux VM, Entra workload identity federation, Run Command, Blob state, budgets, DNS, and HTTPS
 - Terraform, AWS API Gateway, EC2, VPC, IAM, Systems Manager, CloudWatch, and S3 remote state
 
 ## Repository map
@@ -165,8 +173,10 @@ debezium/                replication user and connector registration
 docs/                    architecture narrative and decisions
 scripts/                 end-to-end and multi-replica failover checks
 infra/aws/               Terraform state bootstrap and AWS runtime infrastructure
+infra/azure/             Terraform state bootstrap and Azure runtime infrastructure
 compose.yml              complete local platform
 compose.cloud.yml        cloud-only exposure, resource, secret, and logging policy
+compose.azure.yml        Azure exposure, resource, secret, logging, and HTTPS policy
 ```
 
 ## License

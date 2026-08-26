@@ -1,0 +1,59 @@
+name: Deploy to Azure
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: azure-cloud-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       vars.AZURE_DEPLOY_ENABLED == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: cloud
+      url: ${{ vars.PUBLIC_API_URL }}
+    env:
+      DEPLOY_REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.DEPLOY_REVISION }}
+      - name: Configure short-lived Azure credentials
+        uses: azure/login@v3.0.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Deploy through Azure Run Command
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          VM_NAME: ${{ vars.AZURE_VM_NAME }}
+        run: |
+          deployment_output="$(az vm run-command invoke \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${VM_NAME}" \
+            --command-id RunShellScript \
+            --scripts "sudo cloud-init status --wait && sudo /usr/local/bin/deploy-event-sourced-cqrs ${DEPLOY_REVISION} && printf 'AZURE_DEPLOYMENT_SUCCEEDED\\n'" \
+            --query 'value[].message' \
+            --output tsv)"
+          printf '%s\n' "${deployment_output}"
+          grep --quiet '^AZURE_DEPLOYMENT_SUCCEEDED$' <<<"${deployment_output}"
+      - name: Verify the public event-sourced CQRS flow
+        env:
+          GATEWAY_URL: ${{ vars.PUBLIC_API_URL }}
+          VERIFY_PLATFORM: "false"
+        run: ./scripts/smoke-test.sh

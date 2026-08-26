@@ -1,0 +1,107 @@
+services:
+  discovery-server:
+    ports: !override
+      - "127.0.0.1:8761:8761"
+    mem_limit: 512m
+    logging: &azure_logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  command-db:
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: "${COMMAND_DB_PASSWORD:?Set COMMAND_DB_PASSWORD}"
+    mem_limit: 384m
+    logging: *azure_logging
+
+  query-db:
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: "${QUERY_DB_PASSWORD:?Set QUERY_DB_PASSWORD}"
+    mem_limit: 384m
+    logging: *azure_logging
+
+  kafka:
+    ports: !reset []
+    environment:
+      KAFKA_HEAP_OPTS: "-Xms384m -Xmx640m"
+    mem_limit: 1g
+    logging: *azure_logging
+
+  kafka-init:
+    mem_limit: 256m
+    logging: *azure_logging
+
+  debezium:
+    ports: !override
+      - "127.0.0.1:8083:8083"
+    environment:
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+    mem_limit: 1g
+    logging: *azure_logging
+
+  debezium-init:
+    mem_limit: 128m
+    logging: *azure_logging
+
+  order-command-service:
+    ports: !reset []
+    environment:
+      DATABASE_PASSWORD: "${COMMAND_DB_PASSWORD:?Set COMMAND_DB_PASSWORD}"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=70.0 -XX:+UseG1GC"
+    mem_limit: 640m
+    logging: *azure_logging
+
+  order-query-service:
+    ports: !reset []
+    environment:
+      DATABASE_PASSWORD: "${QUERY_DB_PASSWORD:?Set QUERY_DB_PASSWORD}"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=70.0 -XX:+UseG1GC"
+    mem_limit: 640m
+    logging: *azure_logging
+
+  api-gateway:
+    environment:
+      MANAGEMENT_SERVER_PORT: 9080
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=70.0 -XX:+UseG1GC"
+    ports: !override
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9080:9080"
+    mem_limit: 640m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9080/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    logging: *azure_logging
+
+  edge-proxy:
+    image: caddy:2.10.2-alpine
+    environment:
+      ACME_EMAIL: "${ACME_EMAIL:?Set ACME_EMAIL}"
+      PUBLIC_HOST: "${PUBLIC_HOST:?Set PUBLIC_HOST}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/azure/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:2019/config/ >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    logging: *azure_logging
+
+volumes:
+  caddy-data:
+  caddy-config:
