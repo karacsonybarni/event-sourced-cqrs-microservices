@@ -69,6 +69,11 @@ run "cost_controlled_cloud_topology" {
   }
 
   assert {
+    condition     = output.public_api_url == "https://escqrs-0000000000.polandcentral.cloudapp.azure.com"
+    error_message = "The public API URL must be canonical and omit a trailing slash before callers append paths."
+  }
+
+  assert {
     condition     = strcontains(base64decode(azurerm_linux_virtual_machine.runtime.custom_data), "Environment=HOME=/root")
     error_message = "The systemd deployment service must provide the home directory required by Maven Wrapper."
   }

@@ -1,6 +1,6 @@
 output "public_api_url" {
   description = "Stable HTTPS entry point terminated by Caddy on the Azure VM."
-  value       = "https://${azurerm_public_ip.runtime.fqdn}/"
+  value       = "https://${azurerm_public_ip.runtime.fqdn}"
 }
 
 output "vm_id" {
