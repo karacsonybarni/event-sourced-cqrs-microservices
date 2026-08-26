@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-azure_location="${AZURE_LOCATION:-northeurope}"
+azure_location="${AZURE_LOCATION:-polandcentral}"
 github_repository="${GITHUB_REPOSITORY:-karacsonybarni/event-sourced-cqrs-microservices}"
 github_environment="${GITHUB_ENVIRONMENT:-cloud}"
 azure_config_dir="${AZURE_CONFIG_DIR:?Set AZURE_CONFIG_DIR to a task-owned directory}"

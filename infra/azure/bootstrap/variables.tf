@@ -11,7 +11,7 @@ variable "subscription_id" {
 variable "location" {
   description = "Azure region for the Terraform state backend."
   type        = string
-  default     = "northeurope"
+  default     = "polandcentral"
 }
 
 variable "project_name" {

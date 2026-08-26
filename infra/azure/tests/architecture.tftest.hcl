@@ -12,7 +12,7 @@ mock_provider "azurerm" {
     target          = azurerm_public_ip.runtime
     override_during = plan
     values = {
-      fqdn = "escqrs-0000000000.northeurope.cloudapp.azure.com"
+      fqdn = "escqrs-0000000000.polandcentral.cloudapp.azure.com"
     }
   }
 }

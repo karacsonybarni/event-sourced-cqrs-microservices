@@ -21,7 +21,7 @@ variable "tenant_id" {
 variable "azure_location" {
   description = "Azure region for all runtime resources."
   type        = string
-  default     = "northeurope"
+  default     = "polandcentral"
 }
 
 variable "project_name" {
