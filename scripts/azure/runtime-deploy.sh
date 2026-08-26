@@ -28,6 +28,13 @@ if ! "${compose[@]}" up --build --detach --wait --remove-orphans \
   exit 1
 fi
 
+# Caddy loads its bind-mounted configuration at startup, so recreate only the
+# edge container to apply routing or security-header changes on every release.
+if ! "${compose[@]}" up --detach --force-recreate --no-deps --wait edge-proxy; then
+  "${compose[@]}" logs --no-color --tail 200 edge-proxy >&2 || true
+  exit 1
+fi
+
 GATEWAY_URL=http://localhost:8080 \
 GATEWAY_HEALTH_URL=http://localhost:9080 \
 DISCOVERY_URL=http://localhost:8761 \
