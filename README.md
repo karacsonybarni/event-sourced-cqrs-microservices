@@ -7,7 +7,7 @@
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk)](https://adoptium.net/)
 [![Debezium](https://img.shields.io/badge/Debezium-3.6.1.Final-2C4F7C)](https://debezium.io/)
 
-A runnable reference architecture combining Command Query Responsibility Segregation (CQRS), event sourcing, Debezium change data capture, registry-backed service discovery, and horizontal scaling. The command database stores immutable domain events as the source of truth, Debezium streams committed inserts to Kafka, and replicated query services build and serve a disposable read model.
+A runnable reference architecture combining a React customer portal, Command Query Responsibility Segregation (CQRS), event sourcing, Debezium change data capture, registry-backed service discovery, and horizontal scaling. The command database stores immutable domain events as the source of truth, Debezium streams committed inserts to Kafka, and replicated query services build and serve a disposable read model.
 
 The design follows the pattern language at [microservices.io](https://microservices.io/patterns/microservices.html), especially [Event Sourcing](https://microservices.io/patterns/data/event-sourcing.html), [CQRS](https://microservices.io/patterns/data/cqrs.html), [Database per Service](https://microservices.io/patterns/data/database-per-service.html), [API Gateway](https://microservices.io/patterns/apigateway.html), and [Idempotent Consumer](https://microservices.io/patterns/communication-style/idempotent-consumer.html).
 
@@ -15,7 +15,8 @@ The design follows the pattern language at [microservices.io](https://microservi
 
 ```mermaid
 flowchart LR
-    Client([Client]) -->|HTTP :8080| Gateway[Spring Cloud<br/>API Gateway]
+    Client([Browser / API client]) --> Frontend[React<br/>Order Portal]
+    Frontend -->|same-origin /api| Gateway[Spring Cloud<br/>API Gateway]
     Registry[Eureka<br/>Service Registry]
     Gateway <-->|discover instances| Registry
     Command[Order Command Service<br/>2 replicas] -->|self-register| Registry
@@ -34,6 +35,7 @@ flowchart LR
 
 | Component | Responsibility | Data ownership |
 | --- | --- | --- |
+| `frontend` | Customer order workflow and live architecture proof | None |
 | `api-gateway` | Method-aware routing and correlation IDs | None |
 | `discovery-server` | Instance registry and health-aware service lookup | Registry leases |
 | `order-command-service` | Validates commands, replays aggregates, appends events | Event streams and command deduplication |
@@ -50,9 +52,10 @@ Prerequisites: Docker with Compose, Java 21+, `curl`, and `jq`.
 ```bash
 make up
 make smoke
+make ui-smoke
 ```
 
-`make up` compiles the services, starts PostgreSQL, Kafka, Debezium, Eureka, the gateway, two command-service replicas, and two query-service replicas, registers the connector idempotently, and waits for health checks. `make smoke` proves this flow through the gateway:
+`make up` compiles the services, builds the React application, starts PostgreSQL, Kafka, Debezium, Eureka, the gateway, the order portal, two command-service replicas, and two query-service replicas, registers the connector idempotently, and waits for health checks. Open [http://localhost:3000](http://localhost:3000) or run `make ui-smoke` to verify the local UI. `make smoke` proves this flow through the gateway:
 
 1. create an order;
 2. repeat the same command and verify idempotent replay;
@@ -73,7 +76,7 @@ make down
 
 The repository includes a credit-protected Azure deployment with Terraform, Azure Virtual Network, a hardened Linux VM, private versioned Blob state, Entra workload identity federation, GitHub Actions OIDC, Azure Run Command, boot diagnostics, a resource-group budget, stable DNS, and Caddy-managed HTTPS. It preserves the complete multi-replica Kafka and Debezium topology and refuses to provision unless the Azure subscription is enabled with spending protection set to `On`.
 
-Verified public API: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
+Live React order portal and public API: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
 
 See [Azure cloud deployment](docs/azure-deployment.md) for the architecture, provisioning command, security model, cost boundary, delivery flow, operations, and teardown procedure. [ADR-004](docs/adr/004-credit-protected-azure-deployment.md) records why the complete topology uses promotional credit on one 8-GiB VM instead of the undersized 12-month free VM shapes.
 
@@ -153,6 +156,7 @@ The test suite covers aggregate replay, versioned serialization, append-only dat
 ## Technology baseline
 
 - Java 21 LTS
+- React 19.2, TypeScript 6, Vite 8.2, and Nginx
 - Spring Boot 4.1.1
 - Spring Cloud 2025.1.3, Spring Cloud Gateway, LoadBalancer, and Netflix Eureka
 - Spring Data JPA, Flyway, PostgreSQL 18
@@ -169,6 +173,7 @@ The test suite covers aggregate replay, versioned serialization, append-only dat
 ```text
 api-gateway/             HTTP entry point and routing
 discovery-server/        Eureka service registry
+frontend/                React customer portal and architecture proof
 order-command-service/  event-sourced aggregate, event store, command API
 order-query-service/    Kafka projection, read model, query API
 debezium/                replication user and connector registration

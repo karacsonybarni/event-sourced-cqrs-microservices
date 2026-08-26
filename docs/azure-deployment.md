@@ -4,7 +4,7 @@
 
 This deployment keeps the complete event-sourced CQRS topology available on Azure while the runtime remains economical and reproducible. Terraform provisions one hardened Linux VM, a stable public DNS name, HTTPS termination, versioned remote state, a cost budget, and a short-lived GitHub OIDC delivery identity.
 
-Verified public endpoint: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
+Verified React order portal and API endpoint: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
 
 The deployment runs in Poland Central. Its public event-sourced create, query, and cancel flow, Debezium connector, two command replicas, two query replicas, single-replica failover, HTTPS certificate, management-port isolation, and Terraform state have been verified against the deployed environment.
 
@@ -20,7 +20,8 @@ flowchart TB
     IP --> Caddy[Caddy TLS proxy]
 
     subgraph VM[Azure Linux VM - 2 vCPU / 8 GiB]
-        Caddy --> Gateway[Spring Cloud Gateway]
+        Caddy -->|browser routes| Frontend[React + Nginx]
+        Caddy -->|/api| Gateway[Spring Cloud Gateway]
         Gateway -->|Eureka + load balancing| Command[Command service - 2 replicas]
         Gateway -->|Eureka + load balancing| Query[Query service - 2 replicas]
         Command --> EventStore[(PostgreSQL event store)]
@@ -34,7 +35,7 @@ flowchart TB
     Terraform[Terraform] --> State[(Azure Blob state - private + versioned)]
 ```
 
-Only ports 80 and 443 are permitted by the network security group. Caddy redirects HTTP to HTTPS, obtains and renews the public certificate, and forwards requests to the private gateway port. Eureka, Debezium, Kafka, databases, backend replicas, and Actuator management ports remain on the VM's private Docker network or loopback interface. SSH has no inbound rule; Azure Run Command is the normal administration and deployment path.
+Only ports 80 and 443 are permitted by the network security group. Caddy redirects HTTP to HTTPS, obtains and renews the public certificate, routes `/api` requests directly to the private gateway, and routes browser paths to the React application served by Nginx. A restrictive content security policy keeps the browser application on the same origin. Eureka, Debezium, Kafka, databases, backend replicas, and Actuator management ports remain on the VM's private Docker network or loopback interface. SSH has no inbound rule; Azure Run Command is the normal administration and deployment path.
 
 Two command replicas and two query replicas demonstrate application-level discovery, routing, and failover. The one-VM placement is a cost constraint, not infrastructure high availability: a VM or availability-zone failure stops the complete environment. A production topology would move the services to a managed orchestrator, PostgreSQL to Flexible Server, and Kafka to a managed Kafka-compatible service across failure domains.
 
@@ -85,7 +86,7 @@ The recovery SSH private key is generated under `AZURE_CONFIG_DIR` and is never 
 
 ## Delivery and verification
 
-`.github/workflows/deploy-azure.yml` runs after successful `main` CI when `AZURE_DEPLOY_ENABLED=true`, or by manual dispatch. GitHub exchanges its OIDC token for short-lived Azure credentials and invokes the VM's locked deployment command. The VM fetches the exact CI revision, builds the Spring services, reconciles the Compose topology, and runs the local CDC smoke test before the workflow tests the public HTTPS endpoint.
+`.github/workflows/deploy-azure.yml` runs after successful `main` CI when `AZURE_DEPLOY_ENABLED=true`, or by manual dispatch. GitHub exchanges its OIDC token for short-lived Azure credentials and invokes the VM's locked deployment command. The VM fetches the exact CI revision, builds the Spring services and React application, reconciles the Compose topology, and runs the local CDC smoke test before the workflow tests both the public API flow and the deployed UI assets over HTTPS.
 
 Verify manually after provisioning:
 

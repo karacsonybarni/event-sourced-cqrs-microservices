@@ -118,3 +118,13 @@ services:
         awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
         awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
         tag: "{{.Name}}"
+
+  frontend:
+    ports: !reset []
+    mem_limit: 96m
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        tag: "{{.Name}}"

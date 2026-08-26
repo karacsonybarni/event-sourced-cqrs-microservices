@@ -78,7 +78,13 @@ services:
       start_period: 10s
     logging: *azure_logging
 
+  frontend:
+    ports: !reset []
+    mem_limit: 96m
+    logging: *azure_logging
+
   edge-proxy:
+    profiles: ["ui"]
     image: caddy:2.10.2-alpine
     environment:
       ACME_EMAIL: "${ACME_EMAIL:?Set ACME_EMAIL}"
@@ -92,6 +98,8 @@ services:
       - caddy-config:/config
     depends_on:
       api-gateway:
+        condition: service_healthy
+      frontend:
         condition: service_healthy
     mem_limit: 128m
     healthcheck:

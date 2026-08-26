@@ -1,21 +1,41 @@
 {
-  admin 0.0.0.0:2019
-  email {$ACME_EMAIL}
+	admin 0.0.0.0:2019
+	email {$ACME_EMAIL}
 }
 
 {$PUBLIC_HOST} {
-  encode zstd gzip
-  reverse_proxy api-gateway:8080
+	encode zstd gzip
 
-  header {
-    Strict-Transport-Security "max-age=31536000; includeSubDomains"
-    X-Content-Type-Options "nosniff"
-    X-Frame-Options "DENY"
-    Referrer-Policy "no-referrer"
-  }
+	handle /actuator/* {
+		respond 404
+	}
 
-  log {
-    output stdout
-    format json
-  }
+	handle /eureka/* {
+		respond 404
+	}
+
+	handle /connectors/* {
+		respond 404
+	}
+
+	handle /api/* {
+		reverse_proxy api-gateway:8080
+	}
+
+	handle {
+		reverse_proxy frontend:80
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Content-Security-Policy "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+	}
+
+	log {
+		output stdout
+		format json
+	}
 }

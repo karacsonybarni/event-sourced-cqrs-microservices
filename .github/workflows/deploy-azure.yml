@@ -57,3 +57,7 @@ jobs:
           GATEWAY_URL: ${{ vars.PUBLIC_API_URL }}
           VERIFY_PLATFORM: "false"
         run: ./scripts/smoke-test.sh
+      - name: Verify the public React order portal
+        env:
+          UI_URL: ${{ vars.PUBLIC_API_URL }}
+        run: ./scripts/ui-smoke-test.sh

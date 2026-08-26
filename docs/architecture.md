@@ -6,12 +6,18 @@ This repository uses a small order lifecycle to expose the mechanics of an event
 
 The design favors explicit guarantees and local reproducibility. Event sourcing adds operational and modeling cost, so it should be selected where retaining business history, temporal reconstruction, auditability, or event-driven integration justifies that cost.
 
+## User interface and service boundary
+
+The React order portal is a stateless client of the API gateway. It creates orders, retries a command with the same idempotency key, verifies conflicting-key rejection, polls the eventually consistent read model, cancels an order, and searches the customer projection. Browser and API clients use the same public `/api` boundary; the UI never reaches a database, Kafka, Debezium, Eureka, or a backend instance directly.
+
+`customerId` is an identity boundary input to the order context, not a locally owned customer record. A Customer service would be appropriate when this system owns customer profiles, authentication, consent, addresses, or lifecycle rules and can define an independent bounded context. Adding one only to populate this portal would create a distributed join and another operational dependency without a separate business capability, so the compact architecture deliberately keeps customer identity external.
+
 ## Command and capture flow
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Client
+    actor Client as React portal / API client
     participant G as API Gateway
     participant R as Eureka Registry
     participant C as Command Service
@@ -153,4 +159,4 @@ Both economical environments demonstrate application-level replica behavior but 
 - Add periodic aggregate snapshots only when measured replay cost requires them. Snapshots are derived caches, never replacements for history.
 - Add a schema registry or consumer-driven contract checks as the number of event producers and consumers grows.
 
-Authentication, orchestration manifests, a tracing backend, and snapshotting are outside this compact implementation. The gateway is the natural OAuth2/OIDC enforcement point; Actuator exposes health and metrics integration points.
+Authentication, customer-profile ownership, orchestration manifests, a tracing backend, and snapshotting are outside this compact implementation. The gateway is the natural OAuth2/OIDC enforcement point; a future identity provider supplies the authenticated customer identifier, while Actuator exposes health and metrics integration points.

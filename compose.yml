@@ -226,6 +226,22 @@ services:
       retries: 30
       start_period: 10s
 
+  frontend:
+    profiles: ["ui"]
+    build:
+      context: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ | grep -q 'CQRS Order Portal'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
 volumes:
   command-db-data:
   query-db-data:

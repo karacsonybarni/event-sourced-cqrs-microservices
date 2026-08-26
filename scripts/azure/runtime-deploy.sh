@@ -13,6 +13,7 @@ cd "${repository_root}"
 
 compose=(
   docker compose
+  --profile ui
   --env-file "${runtime_environment}"
   --file compose.yml
   --file compose.azure.yml

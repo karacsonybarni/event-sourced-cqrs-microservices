@@ -60,6 +60,11 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - name: Reject purpose-specific presentation wording
         run: |
           if git grep -I -n -i -E 'inter[v]iew|show[c]ase'; then
@@ -68,9 +73,14 @@ jobs:
           fi
       - name: Verify Maven reactor
         run: ./mvnw --batch-mode --no-transfer-progress clean verify
+      - name: Verify React frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run check
       - name: Validate Docker Compose model
         run: |
-          docker compose config --quiet
+          docker compose --profile ui config --quiet
           if grep --quiet 'awslogs-stream-prefix' compose.cloud.yml; then
             echo 'awslogs-stream-prefix is an ECS option and is unsupported by the Docker Engine awslogs driver.' >&2
             exit 1
@@ -84,7 +94,13 @@ jobs:
           QUERY_DB_PASSWORD=validation \
           PUBLIC_HOST=validation.example.com \
           ACME_EMAIL=validation@example.com \
-            docker compose --file compose.yml --file compose.azure.yml config --quiet
+            docker compose --profile ui --file compose.yml --file compose.azure.yml config --quiet
+          docker run --rm \
+            --env PUBLIC_HOST=validation.example.com \
+            --env ACME_EMAIL=validation@example.com \
+            --volume "$PWD/deploy/azure/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2.10.2-alpine \
+            caddy validate --config /etc/caddy/Caddyfile
       - name: Validate shell scripts
         run: |
           bash -n scripts/*.sh scripts/aws/*.sh scripts/azure/*.sh
@@ -107,6 +123,8 @@ jobs:
         run: make up
       - name: Verify event-sourced CQRS flow
         run: make smoke
+      - name: Verify React order portal
+        run: make ui-smoke
       - name: Verify discovery and replica failover
         run: make scale-smoke
       - name: Capture service logs on failure
