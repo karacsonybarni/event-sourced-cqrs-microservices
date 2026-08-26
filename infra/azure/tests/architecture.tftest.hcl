@@ -74,6 +74,11 @@ run "cost_controlled_cloud_topology" {
   }
 
   assert {
+    condition     = strcontains(base64decode(azurerm_linux_virtual_machine.runtime.custom_data), "openjdk-21-jdk-headless") && strcontains(base64decode(azurerm_linux_virtual_machine.runtime.custom_data), "javac -version")
+    error_message = "The deployment host must include and verify the Java compiler used by the Maven build."
+  }
+
+  assert {
     condition     = azurerm_consumption_budget_resource_group.runtime.amount == 25
     error_message = "The deployment must retain a low monthly cost signal."
   }

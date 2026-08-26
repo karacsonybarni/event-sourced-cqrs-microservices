@@ -5,7 +5,8 @@ exec > >(tee /var/log/event-sourced-cqrs-bootstrap.log | logger -t event-sourced
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install --yes ca-certificates curl docker.io git jq openjdk-21-jre-headless openssl util-linux
+apt-get install --yes ca-certificates curl docker.io git jq openjdk-21-jdk-headless openssl util-linux
+javac -version
 systemctl enable --now docker
 
 compose_asset="docker-compose-linux-x86_64"

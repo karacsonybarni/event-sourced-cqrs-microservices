@@ -11,6 +11,29 @@ ssh_directory="${azure_config_dir}/ssh"
 ssh_private_key="${ssh_directory}/id_ed25519"
 terraform_apply_arguments=()
 
+initialize_runtime_state() {
+  local attempt
+
+  for attempt in {1..60}; do
+    if terraform -chdir="${repository_root}/infra/azure" init \
+      -input=false \
+      -reconfigure \
+      -backend-config="resource_group_name=${state_resource_group}" \
+      -backend-config="storage_account_name=${state_storage_account}" \
+      -backend-config="container_name=${state_container}"; then
+      return 0
+    fi
+
+    if ((attempt == 60)); then
+      echo "Azure Blob role assignment did not propagate within 10 minutes." >&2
+      return 1
+    fi
+
+    printf 'Waiting for Azure Blob role assignment propagation (%d/60)\n' "${attempt}" >&2
+    sleep 10
+  done
+}
+
 if [[ "${AUTO_APPROVE:-false}" == "true" ]]; then
   terraform_apply_arguments+=("-auto-approve")
 fi
@@ -51,12 +74,7 @@ state_resource_group="$(terraform -chdir="${repository_root}/infra/azure/bootstr
 state_storage_account="$(terraform -chdir="${repository_root}/infra/azure/bootstrap" output -state="${bootstrap_state}" -raw storage_account_name)"
 state_container="$(terraform -chdir="${repository_root}/infra/azure/bootstrap" output -state="${bootstrap_state}" -raw container_name)"
 
-terraform -chdir="${repository_root}/infra/azure" init \
-  -input=false \
-  -reconfigure \
-  -backend-config="resource_group_name=${state_resource_group}" \
-  -backend-config="storage_account_name=${state_storage_account}" \
-  -backend-config="container_name=${state_container}"
+initialize_runtime_state
 
 main_apply_arguments=(
   -input=false

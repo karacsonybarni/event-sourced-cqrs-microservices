@@ -69,11 +69,12 @@ Set `AUTO_APPROVE=true` only in a controlled automation context after reviewing 
 
 1. verifies the subscription state and spending limit;
 2. creates a private, versioned Azure Storage backend;
-3. provisions networking, the VM, DNS, boot diagnostics, and the cost budget;
-4. creates an Entra application with an immutable GitHub environment subject;
-5. grants only VM read and Run Command permissions;
-6. configures GitHub environment variables without long-lived Azure secrets; and
-7. starts the Azure deployment workflow.
+3. waits for the Blob data-role assignment to propagate, then initializes remote state;
+4. provisions networking, the VM, DNS, boot diagnostics, and the cost budget;
+5. creates an Entra application with an immutable GitHub environment subject;
+6. grants only VM read and Run Command permissions;
+7. configures GitHub environment variables without long-lived Azure secrets; and
+8. starts the Azure deployment workflow.
 
 The recovery SSH private key is generated under `AZURE_CONFIG_DIR` and is never written to the repository or Terraform state. Port 22 remains closed.
 
