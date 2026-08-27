@@ -106,6 +106,20 @@ azure_client_id="$(terraform -chdir="${repository_root}/infra/azure" output -raw
 resource_group_name="$(terraform -chdir="${repository_root}/infra/azure" output -raw resource_group_name)"
 vm_name="$(terraform -chdir="${repository_root}/infra/azure" output -raw vm_name)"
 public_api_url="$(terraform -chdir="${repository_root}/infra/azure" output -raw public_api_url)"
+activity_function_name="$(terraform -chdir="${repository_root}/infra/azure" output -raw activity_function_name)"
+activity_function_hostname="$(terraform -chdir="${repository_root}/infra/azure" output -raw activity_function_hostname)"
+
+if [[ ! "${activity_function_hostname}" =~ ^[a-z0-9-]+\.azurewebsites\.net$ ]]; then
+  echo "Unexpected Function App hostname: ${activity_function_hostname}" >&2
+  exit 1
+fi
+
+az vm run-command invoke \
+  --resource-group "${resource_group_name}" \
+  --name "${vm_name}" \
+  --command-id RunShellScript \
+  --scripts "sudo cloud-init status --wait && sudo sed -i '/^ACTIVITY_FUNCTION_HOST=/d;/^KAFKA_VNET_HOST=/d' /etc/event-sourced-cqrs/runtime.env && printf '%s\\n' 'ACTIVITY_FUNCTION_HOST=${activity_function_hostname}' 'KAFKA_VNET_HOST=10.42.1.4' | sudo tee -a /etc/event-sourced-cqrs/runtime.env >/dev/null" \
+  --output none
 
 gh api \
   --method PUT \
@@ -114,6 +128,7 @@ gh api \
 gh variable set AWS_DEPLOY_ENABLED --repo "${github_repository}" --body "false"
 gh variable set AZURE_CLIENT_ID --repo "${github_repository}" --body "${azure_client_id}"
 gh variable set AZURE_DEPLOY_ENABLED --repo "${github_repository}" --body "true"
+gh variable set AZURE_FUNCTION_APP_NAME --repo "${github_repository}" --body "${activity_function_name}"
 gh variable set AZURE_RESOURCE_GROUP --repo "${github_repository}" --body "${resource_group_name}"
 gh variable set AZURE_SUBSCRIPTION_ID --repo "${github_repository}" --body "${subscription_id}"
 gh variable set AZURE_TENANT_ID --repo "${github_repository}" --body "${tenant_id}"

@@ -30,6 +30,15 @@ export interface OrderDetails extends OrderSummary {
   version: number;
 }
 
+export interface OrderActivityEvent {
+  id: string;
+  orderId: string;
+  eventType: 'OrderCreated.v1' | 'OrderCancelled.v1';
+  aggregateVersion: number;
+  occurredAt: string;
+  payload: Record<string, unknown>;
+}
+
 export interface Page<T> {
   content: T[];
   totalElements: number;

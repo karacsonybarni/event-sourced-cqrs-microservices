@@ -17,6 +17,7 @@ The design follows the pattern language at [microservices.io](https://microservi
 flowchart LR
     Client([Browser / API client]) --> Frontend[React<br/>Order Portal]
     Frontend -->|same-origin /api| Gateway[Spring Cloud<br/>API Gateway]
+    Frontend -. same-origin /serverless .-> ActivityFunction
     Registry[Eureka<br/>Service Registry]
     Gateway <-->|discover instances| Registry
     Command[Order Command Service<br/>2 replicas] -->|self-register| Registry
@@ -67,9 +68,11 @@ make ui-smoke
 5. cancel the order; and
 6. verify the read model advances from event version 1 to 2.
 
+The Azure image enables a seventh portal proof that independently verifies both lifecycle events in Cosmos DB through the read-only Function route. The local image omits this cloud-only step while retaining the complete event-sourced CQRS flow.
+
 `make scale-smoke` then stops every command and query replica in turn. It waits for Eureka to evict the stopped instance and proves that the gateway continues routing commands and queries to the surviving replica before restoring the full topology.
 
-The Maven reactor also packages `order-activity-function`, a Java 21 Azure Function that consumes the same Kafka event contract and writes an idempotent document projection to Azure Cosmos DB. It is an independent cloud extension rather than a dependency of the local order path. See [ADR-005](docs/adr/005-serverless-nosql-activity-projection.md) for its boundary and deployment trade-offs.
+The Maven reactor also packages `order-activity-function`, a Java 21 Azure Function that consumes the same Kafka event contract and writes an idempotent document projection to Azure Cosmos DB. The Azure deployment places it on Flex Consumption with private virtual-network access to Kafka, managed-identity access to Cosmos DB, and a read-only same-origin activity route. It remains an independent cloud extension rather than a dependency of the local order path. See [ADR-005](docs/adr/005-serverless-nosql-activity-projection.md) for its boundary and deployment trade-offs.
 
 Stop the stack and remove its local volumes with:
 
@@ -79,7 +82,7 @@ make down
 
 ## Deploy to Azure
 
-The repository includes a credit-protected Azure deployment with Terraform, Azure Virtual Network, a hardened Linux VM, private versioned Blob state, Entra workload identity federation, GitHub Actions OIDC, Azure Run Command, boot diagnostics, a resource-group budget, stable DNS, and Caddy-managed HTTPS. It preserves the complete multi-replica Kafka and Debezium topology and refuses to provision unless the Azure subscription is enabled with spending protection set to `On`.
+The repository includes a credit-protected Azure deployment with Terraform, Azure Virtual Network, a hardened Linux VM, Azure Functions Flex Consumption, Cosmos DB for NoSQL, private storage endpoints and DNS, private versioned Blob state, managed identities, GitHub Actions OIDC, Azure Run Command, boot diagnostics, a resource-group budget, stable DNS, and Caddy-managed HTTPS. It preserves the complete multi-replica Kafka and Debezium topology and refuses to provision unless the Azure subscription is enabled with spending protection set to `On`.
 
 Live React order portal and public API: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
 
@@ -155,6 +158,7 @@ docker compose config --quiet
 make up
 make smoke
 make scale-smoke
+GATEWAY_URL=https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com ./scripts/serverless-smoke-test.sh
 ```
 
 The test suite covers aggregate replay, versioned serialization, append-only database enforcement, concurrent create/cancel commands, idempotent command fingerprints, duplicate event delivery, stale projection versions, dead-letter routing, API behavior, gateway correlation IDs, and load-balanced route configuration. The smoke tests add real PostgreSQL logical decoding, Debezium, Kafka, Eureka registration, two replicas of each business service, instance eviction, failover, both databases, Flyway, and all HTTP services.

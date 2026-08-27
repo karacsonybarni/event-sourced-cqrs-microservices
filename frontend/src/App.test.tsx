@@ -62,6 +62,12 @@ describe('App', () => {
           content: [cancelledOrder],
           totalElements: 1,
         }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse([
+          { id: 'event-1', orderId, eventType: 'OrderCreated.v1', aggregateVersion: 1 },
+          { id: 'event-2', orderId, eventType: 'OrderCancelled.v1', aggregateVersion: 2 },
+        ]),
       );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -69,16 +75,19 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Run complete architecture proof' }));
 
     expect(
-      await screen.findByText('All CQRS and event-sourcing guarantees completed successfully.'),
+      await screen.findByText(
+        'All CQRS, event-sourcing, and serverless projection guarantees completed successfully.',
+      ),
     ).toBeVisible();
-    await waitFor(() => expect(screen.getAllByText('Passed')).toHaveLength(6));
+    await waitFor(() => expect(screen.getAllByText('Passed')).toHaveLength(7));
     expect(screen.getByText('v2')).toBeVisible();
     expect(screen.getAllByText('CANCELLED').length).toBeGreaterThan(0);
 
-    expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(fetchMock).toHaveBeenCalledTimes(8);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/orders');
     expect(fetchMock.mock.calls[3]?.[0]).toBe(`/api/orders/${orderId}`);
     expect(fetchMock.mock.calls[4]?.[0]).toBe(`/api/orders/${orderId}/cancellation`);
     expect(String(fetchMock.mock.calls[6]?.[0])).toContain('status=CANCELLED');
+    expect(fetchMock.mock.calls[7]?.[0]).toBe(`/serverless/api/activity/${orderId}`);
   });
 });

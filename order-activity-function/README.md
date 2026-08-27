@@ -21,13 +21,15 @@ Configure these Function App settings through the deployment platform:
 | `KAFKA_BROKERS` | Kafka bootstrap endpoints reachable from the Function App network |
 | `COSMOS_DATABASE_NAME` | Existing Cosmos DB for NoSQL database |
 | `COSMOS_CONTAINER_NAME` | Existing container partitioned by `/orderId` |
-| `CosmosConnection` | Cosmos DB binding connection setting |
+| `CosmosConnection__accountEndpoint` | Cosmos DB account endpoint used by the identity-based binding |
+| `CosmosConnection__credential` | `managedidentity` in Azure |
+| `CosmosConnection__clientId` | User-assigned managed identity client ID |
 
 Run the app on Azure Functions 4.x using Flex Consumption, Elastic Premium, or Dedicated hosting because Kafka bindings require one of those plans. The supplied `host.json` selects the supported 4.x extension bundle containing the Kafka and Cosmos DB bindings.
 
 Runtime references: [Azure Functions Kafka bindings](https://learn.microsoft.com/en-us/azure/azure-functions/functions-bindings-kafka) and [Azure Cosmos DB output binding](https://learn.microsoft.com/en-us/azure/azure-functions/functions-bindings-cosmosdb-v2-output).
 
-The broker should use authenticated TLS outside a private development network. Store the Cosmos connection as a Function App secret or replace it with an identity-based connection supported by the binding; keep connection values out of source control.
+The Azure deployment reaches the broker through a delegated Function subnet and a Kafka listener advertised only on the VM's private address. The Cosmos binding and Function host storage use a user-assigned managed identity, so no database or storage account keys are stored in the repository or GitHub.
 
 ## Delivery behavior
 
@@ -35,5 +37,6 @@ The broker should use authenticated TLS outside a private development network. S
 - Invalid-event topic: `orders.events.v1.activity.DLT`
 - Cosmos DB partition key: `/orderId`
 - Cosmos DB document ID: immutable event `eventId`
+- Read endpoint: `GET /api/activity/{orderId}`
 - Consistency: asynchronous and at least once
 - Recovery: transient failures retry with exponential backoff until the dependency recovers; invalid envelopes move to the activity dead-letter topic; duplicate delivery converges on the same document

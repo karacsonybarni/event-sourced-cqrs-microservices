@@ -94,10 +94,13 @@ jobs:
           QUERY_DB_PASSWORD=validation \
           PUBLIC_HOST=validation.example.com \
           ACME_EMAIL=validation@example.com \
+          ACTIVITY_FUNCTION_HOST=activity.example.com \
+          KAFKA_VNET_HOST=10.42.1.4 \
             docker compose --profile ui --file compose.yml --file compose.azure.yml config --quiet
           docker run --rm \
             --env PUBLIC_HOST=validation.example.com \
             --env ACME_EMAIL=validation@example.com \
+            --env ACTIVITY_FUNCTION_HOST=activity.example.com \
             --volume "$PWD/deploy/azure/Caddyfile:/etc/caddy/Caddyfile:ro" \
             caddy:2.10.2-alpine \
             caddy validate --config /etc/caddy/Caddyfile

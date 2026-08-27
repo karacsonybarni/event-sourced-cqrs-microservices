@@ -6,6 +6,7 @@ import {
   findOrders,
   getOrder,
   waitForOrder,
+  waitForOrderActivity,
 } from './api';
 import type {
   CreateOrderRequest,
@@ -21,7 +22,9 @@ const defaultItems: OrderItemInput[] = [
   { productId: 'wireless-mouse', quantity: 2, unitPrice: 39.5 },
 ];
 
-const proofTemplate: ProofStep[] = [
+const serverlessProjectionEnabled = import.meta.env.VITE_SERVERLESS_PROJECTION_ENABLED !== 'false';
+
+const coreProofSteps: ProofStep[] = [
   {
     id: 'command',
     label: 'Command accepted',
@@ -59,6 +62,17 @@ const proofTemplate: ProofStep[] = [
     state: 'idle',
   },
 ];
+
+const serverlessProofStep: ProofStep = {
+  id: 'serverless',
+  label: 'Serverless activity verified',
+  detail: 'Azure Functions projects the same Kafka events into a Cosmos DB document view.',
+  state: 'idle',
+};
+
+const proofTemplate = serverlessProjectionEnabled
+  ? [...coreProofSteps, serverlessProofStep]
+  : coreProofSteps;
 
 function newIdempotencyKey(): string {
   const suffix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
@@ -247,7 +261,23 @@ export default function App() {
         state: 'success',
         detail: `Query model returned ${page.totalElements} cancelled customer order${page.totalElements === 1 ? '' : 's'}`,
       });
-      setMessage('All CQRS and event-sourcing guarantees completed successfully.');
+
+      if (serverlessProjectionEnabled) {
+        updateProof('serverless', { state: 'running' });
+        setMessage('Waiting for the serverless Kafka-to-Cosmos projection…');
+        const activity = await waitForOrderActivity(cancelled.orderId, 2);
+        const eventTypes = activity.map((entry) => entry.eventType);
+        if (!eventTypes.includes('OrderCreated.v1') || !eventTypes.includes('OrderCancelled.v1')) {
+          throw new Error('The Cosmos activity view did not contain both lifecycle events.');
+        }
+        updateProof('serverless', {
+          state: 'success',
+          detail: `${activity.length} immutable documents · Azure Functions + Cosmos DB`,
+        });
+        setMessage('All CQRS, event-sourcing, and serverless projection guarantees completed successfully.');
+      } else {
+        setMessage('All local CQRS and event-sourcing guarantees completed successfully.');
+      }
     } catch (caught) {
       const detail = caught instanceof Error ? caught.message : 'Architecture proof failed.';
       setProofSteps((current) =>
@@ -356,7 +386,7 @@ export default function App() {
           </div>
           <ArchitectureArrow />
           <div className="architecture-node">
-            <span>04</span><strong>Query model</strong><small>Projected PostgreSQL</small>
+            <span>04</span><strong>Read models</strong><small>PostgreSQL + Cosmos DB</small>
           </div>
         </section>
 
@@ -552,7 +582,7 @@ export default function App() {
       </main>
 
       <footer>
-        <p>React · Spring Cloud Gateway · Eureka · PostgreSQL · Debezium · Kafka</p>
+        <p>React · Spring Cloud · PostgreSQL · Debezium · Kafka · Azure Functions · Cosmos DB</p>
         <span>Event-sourced CQRS reference architecture</span>
       </footer>
     </div>

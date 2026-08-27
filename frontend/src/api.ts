@@ -2,6 +2,7 @@ import type {
   CommandResponse,
   CreateOrderRequest,
   OrderDetails,
+  OrderActivityEvent,
   OrderStatus,
   OrderSummary,
   Page,
@@ -87,4 +88,23 @@ export async function waitForOrder(
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error(`Read model did not reach ${expectedStatus} within ${timeoutMs / 1000} seconds`);
+}
+
+export async function waitForOrderActivity(
+  orderId: string,
+  expectedEventCount: number,
+  timeoutMs = 60_000,
+): Promise<OrderActivityEvent[]> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const response = await fetch(`/serverless/api/activity/${orderId}`);
+    const activity = await readJson<OrderActivityEvent[]>(response);
+    if (activity.length >= expectedEventCount) {
+      return activity;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error(
+    `Serverless activity projection did not reach ${expectedEventCount} events within ${timeoutMs / 1000} seconds`,
+  );
 }

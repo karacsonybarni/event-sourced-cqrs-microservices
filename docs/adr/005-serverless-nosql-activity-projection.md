@@ -17,16 +17,19 @@ Retry transient execution failures until recovery, using exponential backoff cap
 
 Keep the Function outside the synchronous order path and outside the primary CQRS read model. PostgreSQL remains authoritative for event streams and remains the query service's optimized store. Package the Function in the Maven reactor with Azure Functions runtime metadata generated from its annotations.
 
-Use Azure Functions Flex Consumption for a cloud deployment because Kafka triggers require Functions 4.x on Flex Consumption, Elastic Premium, or Dedicated hosting. Keep deployment opt-in because the Function needs network reachability to the Kafka broker and a Cosmos DB account. A Cosmos DB free-tier account can cap the document workload, while the Function can scale to zero between events.
+Use Azure Functions Flex Consumption because Kafka triggers require Functions 4.x on Flex Consumption, Elastic Premium, or Dedicated hosting. Integrate a dedicated Function subnet with the runtime virtual network and expose a second Kafka listener only on the VM's private address. Cap the Function at two on-demand instances with no always-ready allocation so it scales to zero between events.
+
+Provision one Cosmos DB account with the lifetime free-tier discount, 400 RU/s of shared provisioned throughput, and one `/orderId`-partitioned container. Use a user-assigned managed identity for Function host storage and Cosmos DB data access; disable Cosmos DB local-key authentication. Expose a read-only HTTP Function for one order's activity so the public portal and deployment checks can verify the derived NoSQL view end to end.
 
 ## Consequences
 
 - Event processing scales independently and runs only when Kafka supplies work.
 - Event-specific payloads remain natural JSON documents rather than sparse relational columns.
+- The public proof can compare the relational current-state projection with the document-oriented activity timeline.
 - At-least-once delivery is idempotent because the same event writes the same document ID in the same logical partition.
 - Activity-projection outages create lag without reducing command or primary query availability.
 - A prolonged downstream outage pauses affected Kafka partitions and requires an operational alert.
-- Cosmos DB and the Function add monitoring, networking, retention, and cost boundaries when deployed.
+- Cosmos DB and the Function add monitoring, networking, retention, and cost boundaries; Terraform enforces free-tier throughput and scale-to-zero defaults.
 - The activity view is derived data and can be rebuilt from retained Kafka history or the authoritative event store.
 
 ## Alternatives considered

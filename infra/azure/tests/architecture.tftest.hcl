@@ -15,6 +15,23 @@ mock_provider "azurerm" {
       fqdn = "escqrs-0000000000.polandcentral.cloudapp.azure.com"
     }
   }
+
+  override_resource {
+    target          = azurerm_subnet.functions
+    override_during = plan
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/event-sourced-cqrs-cloud/providers/Microsoft.Network/virtualNetworks/event-sourced-cqrs-cloud-vnet/subnets/serverless"
+    }
+  }
+
+
+  override_resource {
+    target          = azurerm_subnet.private_endpoints
+    override_during = plan
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/event-sourced-cqrs-cloud/providers/Microsoft.Network/virtualNetworks/event-sourced-cqrs-cloud-vnet/subnets/private-endpoints"
+    }
+  }
 }
 
 mock_provider "azuread" {
@@ -86,5 +103,36 @@ run "cost_controlled_cloud_topology" {
   assert {
     condition     = azurerm_consumption_budget_resource_group.runtime.amount == 25
     error_message = "The deployment must retain a low monthly cost signal."
+  }
+
+  assert {
+    condition     = azurerm_cosmosdb_account.activity.free_tier_enabled && azurerm_cosmosdb_sql_database.activity.throughput == 400
+    error_message = "The NoSQL projection must remain inside the Cosmos DB lifetime free-tier allowance."
+  }
+
+  assert {
+    condition     = azurerm_function_app_flex_consumption.activity.maximum_instance_count == 2 && length(azurerm_function_app_flex_consumption.activity.always_ready) == 0
+    error_message = "The Function must scale to zero and cap burst scale at two instances."
+  }
+
+  assert {
+    condition     = azurerm_function_app_flex_consumption.activity.virtual_network_subnet_id == azurerm_subnet.functions.id
+    error_message = "The Function must reach Kafka only through the delegated private-network subnet."
+  }
+
+  assert {
+    condition     = azurerm_storage_account.activity_function.shared_access_key_enabled == false && azurerm_cosmosdb_account.activity.local_authentication_enabled == false
+    error_message = "The serverless projection must use managed identities instead of storage or Cosmos DB account keys."
+  }
+
+  assert {
+    condition     = azurerm_storage_account.activity_function.network_rules[0].default_action == "Deny"
+    error_message = "Function storage must deny traffic outside its explicit network boundary."
+  }
+
+
+  assert {
+    condition     = length(azurerm_private_endpoint.activity_storage) == 3
+    error_message = "Function storage must expose blob, queue, and table services only through private endpoints."
   }
 }

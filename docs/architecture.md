@@ -8,7 +8,7 @@ The design favors explicit guarantees and local reproducibility. Event sourcing 
 
 ## User interface and service boundary
 
-The React order portal is a stateless client of the API gateway. It creates orders, retries a command with the same idempotency key, verifies conflicting-key rejection, polls the eventually consistent read model, cancels an order, and searches the customer projection. Browser and API clients use the same public `/api` boundary; the UI never reaches a database, Kafka, Debezium, Eureka, or a backend instance directly.
+The React order portal is a stateless client of the API gateway. It creates orders, retries a command with the same idempotency key, verifies conflicting-key rejection, polls the eventually consistent read model, cancels an order, searches the customer projection, and verifies the independent serverless activity view. Browser and API clients use the same public origin: `/api` reaches Spring Cloud Gateway and `/serverless` reaches the read-only Azure Function through Caddy. The UI never reaches a database, Kafka, Debezium, Eureka, or a backend instance directly.
 
 `customerId` is an identity boundary input to the order context, not a locally owned customer record. A Customer service would be appropriate when this system owns customer profiles, authentication, consent, addresses, or lifecycle rules and can define an independent bounded context. Adding one only to populate this portal would create a distributed join and another operational dependency without a separate business capability, so the compact architecture deliberately keeps customer identity external.
 
@@ -104,7 +104,7 @@ Cosmos DB uses `/orderId` as the partition key, keeping one order's timeline in 
 
 Transient execution failures retry indefinitely with exponential backoff capped at one minute between attempts, preserving the affected partition's offset until its dependency recovers. Invalid envelopes are published to `orders.events.v1.activity.DLT` so one poison event cannot stall its Kafka partition.
 
-This projection is an independent observer. Command handling and the primary query API retain their PostgreSQL ownership and availability when the Function or Cosmos DB is unavailable. The document model is appropriate for a schema-flexible timeline whose event-specific payload varies, while the relational query model remains appropriate for current-order searches and constraints.
+This projection is an independent observer. Command handling and the primary query API retain their PostgreSQL ownership and availability when the Function or Cosmos DB is unavailable. A read-only HTTP Function queries one order partition for the portal's live proof without placing Cosmos DB in the primary query path. The document model is appropriate for a schema-flexible timeline whose event-specific payload varies, while the relational query model remains appropriate for current-order searches and constraints.
 
 ## Asynchronous messaging and cloud service models
 
@@ -116,7 +116,7 @@ The cloud artifacts map the common service models to concrete ownership boundari
 | --- | --- | --- | --- |
 | IaaS | Azure Linux VM, virtual network, network interface, and managed disk | Public runtime | Azure operates physical infrastructure; the project operates the guest OS, Docker, and services |
 | PaaS / FaaS | Azure Blob Storage for Terraform state | Active deployment foundation | Azure operates the storage platform and durability mechanisms |
-| PaaS / FaaS | Azure Functions and Azure Cosmos DB for NoSQL | Packaged, opt-in projection | Azure operates the service runtime, scaling mechanism, patching, and document platform |
+| PaaS / FaaS | Azure Functions and Azure Cosmos DB for NoSQL | Active independent projection | Azure operates the service runtime, scaling mechanism, patching, and document platform |
 | SaaS | GitHub repository and GitHub Actions | Active source-control and delivery platform | The project consumes source-control and CI/CD capabilities as hosted software |
 
 Azure Functions is the Azure equivalent of the event-driven compute model associated with AWS Lambda. A second Lambda implementation would duplicate the same handler without adding another business boundary.

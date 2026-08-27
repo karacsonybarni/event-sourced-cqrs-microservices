@@ -1,6 +1,8 @@
 package com.karacsonybarni.orders.activity;
 
 import java.lang.reflect.Method;
+
+import com.microsoft.azure.functions.BrokerProtocol;
 import com.microsoft.azure.functions.OutputBinding;
 import com.microsoft.azure.functions.annotation.CosmosDBOutput;
 import com.microsoft.azure.functions.annotation.ExponentialBackoffRetry;
@@ -30,6 +32,7 @@ class OrderActivityFunctionTest {
         assertThat(trigger.topic()).isEqualTo("orders.events.v1");
         assertThat(trigger.brokerList()).isEqualTo("%KAFKA_BROKERS%");
         assertThat(trigger.consumerGroup()).isEqualTo("order-activity-function-v1");
+        assertThat(trigger.protocol()).isEqualTo(BrokerProtocol.PLAINTEXT);
 
         CosmosDBOutput output = function.getParameters()[1].getAnnotation(CosmosDBOutput.class);
         assertThat(output.databaseName()).isEqualTo("%COSMOS_DATABASE_NAME%");
@@ -40,6 +43,7 @@ class OrderActivityFunctionTest {
         KafkaOutput deadLetter = function.getParameters()[2].getAnnotation(KafkaOutput.class);
         assertThat(deadLetter.topic()).isEqualTo("orders.events.v1.activity.DLT");
         assertThat(deadLetter.brokerList()).isEqualTo("%KAFKA_BROKERS%");
+        assertThat(deadLetter.protocol()).isEqualTo(BrokerProtocol.PLAINTEXT);
         assertThat(deadLetter.enableIdempotence()).isTrue();
 
         ExponentialBackoffRetry retry = function.getAnnotation(ExponentialBackoffRetry.class);

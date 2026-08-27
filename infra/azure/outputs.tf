@@ -3,6 +3,21 @@ output "public_api_url" {
   value       = "https://${azurerm_public_ip.runtime.fqdn}"
 }
 
+output "activity_function_name" {
+  description = "Flex Consumption Function App that projects Kafka events into Cosmos DB."
+  value       = azurerm_function_app_flex_consumption.activity.name
+}
+
+output "activity_function_hostname" {
+  description = "Public Function hostname used by the same-origin Caddy route."
+  value       = azurerm_function_app_flex_consumption.activity.default_hostname
+}
+
+output "activity_cosmos_account_name" {
+  description = "Free-tier Cosmos DB account containing the serverless activity projection."
+  value       = azurerm_cosmosdb_account.activity.name
+}
+
 output "vm_id" {
   description = "Azure Run Command deployment target."
   value       = azurerm_linux_virtual_machine.runtime.id

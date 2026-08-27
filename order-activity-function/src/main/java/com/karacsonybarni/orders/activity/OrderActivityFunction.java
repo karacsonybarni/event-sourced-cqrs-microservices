@@ -2,6 +2,7 @@ package com.karacsonybarni.orders.activity;
 
 import com.microsoft.azure.functions.ExecutionContext;
 import com.microsoft.azure.functions.OutputBinding;
+import com.microsoft.azure.functions.BrokerProtocol;
 import com.microsoft.azure.functions.annotation.CosmosDBOutput;
 import com.microsoft.azure.functions.annotation.ExponentialBackoffRetry;
 import com.microsoft.azure.functions.annotation.FunctionName;
@@ -25,6 +26,7 @@ public class OrderActivityFunction {
                     topic = "orders.events.v1",
                     brokerList = "%KAFKA_BROKERS%",
                     consumerGroup = "order-activity-function-v1",
+                    protocol = BrokerProtocol.PLAINTEXT,
                     dataType = "string") String serializedEvent,
             @CosmosDBOutput(
                     name = "activityDocument",
@@ -36,6 +38,7 @@ public class OrderActivityFunction {
                     name = "deadLetterEvent",
                     topic = "orders.events.v1.activity.DLT",
                     brokerList = "%KAFKA_BROKERS%",
+                    protocol = BrokerProtocol.PLAINTEXT,
                     dataType = "string",
                     enableIdempotence = true) OutputBinding<String> deadLetterOutput,
             ExecutionContext context) {

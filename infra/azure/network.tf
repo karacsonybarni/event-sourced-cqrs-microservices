@@ -13,6 +13,30 @@ resource "azurerm_subnet" "runtime" {
   address_prefixes     = ["10.42.1.0/24"]
 }
 
+resource "azurerm_subnet" "functions" {
+  name                 = "serverless"
+  resource_group_name  = azurerm_resource_group.runtime.name
+  virtual_network_name = azurerm_virtual_network.runtime.name
+  address_prefixes     = ["10.42.2.0/27"]
+
+  delegation {
+    name = "flex-consumption"
+
+    service_delegation {
+      name    = "Microsoft.App/environments"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+    }
+  }
+}
+
+resource "azurerm_subnet" "private_endpoints" {
+  name                              = "private-endpoints"
+  resource_group_name               = azurerm_resource_group.runtime.name
+  virtual_network_name              = azurerm_virtual_network.runtime.name
+  address_prefixes                  = ["10.42.3.0/28"]
+  private_endpoint_network_policies = "Disabled"
+}
+
 resource "azurerm_network_security_group" "runtime" {
   name                = "${local.name_prefix}-nsg"
   location            = azurerm_resource_group.runtime.location
@@ -67,7 +91,8 @@ resource "azurerm_network_interface" "runtime" {
   ip_configuration {
     name                          = "platform"
     subnet_id                     = azurerm_subnet.runtime.id
-    private_ip_address_allocation = "Dynamic"
+    private_ip_address_allocation = "Static"
+    private_ip_address            = "10.42.1.4"
     public_ip_address_id          = azurerm_public_ip.runtime.id
   }
 }

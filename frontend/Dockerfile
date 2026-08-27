@@ -1,6 +1,8 @@
 FROM node:24.15.0-alpine AS build
 
 WORKDIR /app
+ARG VITE_SERVERLESS_PROJECTION_ENABLED=false
+ENV VITE_SERVERLESS_PROJECTION_ENABLED=${VITE_SERVERLESS_PROJECTION_ENABLED}
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY index.html tsconfig.json vite.config.ts ./

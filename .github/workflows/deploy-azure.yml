@@ -38,6 +38,24 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Package and deploy the serverless activity projection
+        env:
+          FUNCTION_APP_NAME: ${{ vars.AZURE_FUNCTION_APP_NAME }}
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+        run: |
+          ./mvnw --batch-mode --no-transfer-progress -pl order-activity-function -am -DskipTests package
+          cd order-activity-function/target/azure-functions/order-activity-function
+          zip -qr ../../../../order-activity-function.zip .
+          cd ../../../..
+          az functionapp deployment source config-zip \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${FUNCTION_APP_NAME}" \
+            --src order-activity-function.zip
       - name: Deploy through Azure Run Command
         env:
           RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
@@ -61,3 +79,7 @@ jobs:
         env:
           UI_URL: ${{ vars.PUBLIC_API_URL }}
         run: ./scripts/ui-smoke-test.sh
+      - name: Verify the public serverless NoSQL projection
+        env:
+          GATEWAY_URL: ${{ vars.PUBLIC_API_URL }}
+        run: ./scripts/serverless-smoke-test.sh

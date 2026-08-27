@@ -23,6 +23,7 @@ provider "azurerm" {
   subscription_id = var.subscription_id
   resource_providers_to_register = [
     "Microsoft.Authorization",
+    "Microsoft.App",
     "Microsoft.Compute",
     "Microsoft.Consumption",
     "Microsoft.CostManagement",
@@ -30,6 +31,8 @@ provider "azurerm" {
     "Microsoft.Network",
     "Microsoft.Resources",
     "Microsoft.Storage",
+    "Microsoft.Web",
+    "Microsoft.DocumentDB",
     "microsoft.insights",
   ]
 }
