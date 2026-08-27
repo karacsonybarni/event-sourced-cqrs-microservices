@@ -161,6 +161,7 @@ resource "azurerm_function_app_flex_consumption" "activity" {
   maximum_instance_count                         = 2
   instance_memory_in_mb                          = 2048
   virtual_network_subnet_id                      = azurerm_subnet.functions.id
+  https_only                                     = true
   webdeploy_publish_basic_authentication_enabled = false
 
   identity {

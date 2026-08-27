@@ -114,12 +114,15 @@ if [[ ! "${activity_function_hostname}" =~ ^[a-z0-9-]+\.azurewebsites\.net$ ]]; 
   exit 1
 fi
 
-az vm run-command invoke \
+runtime_initialization_output="$(az vm run-command invoke \
   --resource-group "${resource_group_name}" \
   --name "${vm_name}" \
   --command-id RunShellScript \
-  --scripts "sudo cloud-init status --wait && sudo sed -i '/^ACTIVITY_FUNCTION_HOST=/d;/^KAFKA_VNET_HOST=/d' /etc/event-sourced-cqrs/runtime.env && printf '%s\\n' 'ACTIVITY_FUNCTION_HOST=${activity_function_hostname}' 'KAFKA_VNET_HOST=10.42.1.4' | sudo tee -a /etc/event-sourced-cqrs/runtime.env >/dev/null" \
-  --output none
+  --scripts "sudo cloud-init status --wait && sudo sed -i '/^ACTIVITY_FUNCTION_HOST=/d;/^KAFKA_VNET_HOST=/d' /etc/event-sourced-cqrs/runtime.env && printf '%s\\n' 'ACTIVITY_FUNCTION_HOST=${activity_function_hostname}' 'KAFKA_VNET_HOST=10.42.1.4' | sudo tee -a /etc/event-sourced-cqrs/runtime.env >/dev/null && sudo systemctl start event-sourced-cqrs.service && printf 'AZURE_RUNTIME_INITIALIZATION_SUCCEEDED\\n'" \
+  --query 'value[].message' \
+  --output tsv)"
+printf '%s\n' "${runtime_initialization_output}"
+grep --quiet '^AZURE_RUNTIME_INITIALIZATION_SUCCEEDED$' <<<"${runtime_initialization_output}"
 
 gh api \
   --method PUT \

@@ -23,7 +23,9 @@
 	}
 
 	handle_path /serverless/* {
-		reverse_proxy https://{$ACTIVITY_FUNCTION_HOST}
+		reverse_proxy https://{$ACTIVITY_FUNCTION_HOST} {
+			header_up Host {upstream_hostport}
+		}
 	}
 
 	handle {

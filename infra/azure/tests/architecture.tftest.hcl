@@ -101,6 +101,11 @@ run "cost_controlled_cloud_topology" {
   }
 
   assert {
+    condition     = strcontains(base64decode(azurerm_linux_virtual_machine.runtime.custom_data), "systemctl enable event-sourced-cqrs.service") && !strcontains(base64decode(azurerm_linux_virtual_machine.runtime.custom_data), "systemctl enable --now event-sourced-cqrs.service")
+    error_message = "Cloud-init must defer the first application start until provisioning injects the runtime endpoints."
+  }
+
+  assert {
     condition     = azurerm_consumption_budget_resource_group.runtime.amount == 25
     error_message = "The deployment must retain a low monthly cost signal."
   }
@@ -118,6 +123,11 @@ run "cost_controlled_cloud_topology" {
   assert {
     condition     = azurerm_function_app_flex_consumption.activity.virtual_network_subnet_id == azurerm_subnet.functions.id
     error_message = "The Function must reach Kafka only through the delegated private-network subnet."
+  }
+
+  assert {
+    condition     = azurerm_function_app_flex_consumption.activity.https_only
+    error_message = "The public Function endpoint must reject cleartext HTTP requests."
   }
 
   assert {

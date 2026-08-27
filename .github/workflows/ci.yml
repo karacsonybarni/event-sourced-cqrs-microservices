@@ -104,9 +104,28 @@ jobs:
             --volume "$PWD/deploy/azure/Caddyfile:/etc/caddy/Caddyfile:ro" \
             caddy:2.10.2-alpine \
             caddy validate --config /etc/caddy/Caddyfile
+          if ! grep --fixed-strings --quiet 'header_up Host {upstream_hostport}' deploy/azure/Caddyfile; then
+            echo 'Caddy 2.10 must send the Azure Function hostname in the upstream Host header.' >&2
+            exit 1
+          fi
       - name: Validate shell scripts
         run: |
           bash -n scripts/*.sh scripts/aws/*.sh scripts/azure/*.sh
+          if ! awk '
+            /--scripts .*ACTIVITY_FUNCTION_HOST=.*KAFKA_VNET_HOST=.*sudo tee .*&& sudo systemctl start event-sourced-cqrs.service && printf .*AZURE_RUNTIME_INITIALIZATION_SUCCEEDED/ { runtime_initialization = NR }
+            /--query .*value\[\]\.message/ { command_output = NR }
+            /grep --quiet .*AZURE_RUNTIME_INITIALIZATION_SUCCEEDED/ { success_check = NR }
+            /gh variable set AWS_DEPLOY_ENABLED/ { repository_variables = NR }
+            END {
+              exit !(
+                runtime_initialization && command_output && success_check && repository_variables &&
+                runtime_initialization < command_output && command_output < success_check && success_check < repository_variables
+              )
+            }
+          ' scripts/azure/provision.sh; then
+            echo 'Azure provisioning must verify successful runtime initialization before configuring repository deployment.' >&2
+            exit 1
+          fi
           docker run --rm -v "$PWD:/mnt" \
             koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d \
             scripts/*.sh scripts/aws/*.sh scripts/azure/*.sh
