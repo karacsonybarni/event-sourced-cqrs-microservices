@@ -116,12 +116,7 @@ jobs:
             /--query .*value\[\]\.message/ { command_output = NR }
             /grep --quiet .*AZURE_RUNTIME_INITIALIZATION_SUCCEEDED/ { success_check = NR }
             /gh variable set AWS_DEPLOY_ENABLED/ { repository_variables = NR }
-            END {
-              exit !(
-                runtime_initialization && command_output && success_check && repository_variables &&
-                runtime_initialization < command_output && command_output < success_check && success_check < repository_variables
-              )
-            }
+            END { exit !(runtime_initialization && command_output && success_check && repository_variables && runtime_initialization < command_output && command_output < success_check && success_check < repository_variables) }
           ' scripts/azure/provision.sh; then
             echo 'Azure provisioning must verify successful runtime initialization before configuring repository deployment.' >&2
             exit 1
