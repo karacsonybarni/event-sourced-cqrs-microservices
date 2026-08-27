@@ -44,16 +44,35 @@ jobs:
           cache: maven
       - name: Package and deploy the serverless activity projection
         env:
-          FUNCTION_APP_NAME: ${{ vars.AZURE_FUNCTION_APP_NAME }}
+          CONFIGURED_FUNCTION_APP_NAME: ${{ vars.AZURE_FUNCTION_APP_NAME }}
           RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
         run: |
+          function_app_name="${CONFIGURED_FUNCTION_APP_NAME}"
+          if [[ -z "${function_app_name}" ]]; then
+            subscription_suffix="${SUBSCRIPTION_ID//-/}"
+            function_app_name="escqrs-activity-${subscription_suffix:0:10}"
+          fi
+
+          if [[ -z "${RESOURCE_GROUP}" || -z "${SUBSCRIPTION_ID}" ]]; then
+            echo "Azure deployment repository variables are incomplete." >&2
+            exit 1
+          fi
+
+          echo "Deploying Function App ${function_app_name} in ${RESOURCE_GROUP}."
+          az resource show \
+            --resource-group "${RESOURCE_GROUP}" \
+            --resource-type "Microsoft.Web/sites" \
+            --name "${function_app_name}" \
+            --output none
+
           ./mvnw --batch-mode --no-transfer-progress -pl order-activity-function -am -DskipTests package
           cd order-activity-function/target/azure-functions/order-activity-function
           zip -qr ../../../../order-activity-function.zip .
           cd ../../../..
           az functionapp deployment source config-zip \
             --resource-group "${RESOURCE_GROUP}" \
-            --name "${FUNCTION_APP_NAME}" \
+            --name "${function_app_name}" \
             --src order-activity-function.zip
       - name: Deploy through Azure Run Command
         env:
