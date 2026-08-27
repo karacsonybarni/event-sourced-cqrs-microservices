@@ -23,12 +23,16 @@
     <module>api-gateway</module>
     <module>order-command-service</module>
     <module>order-query-service</module>
+    <module>order-activity-function</module>
   </modules>
 
   <properties>
     <java.version>21</java.version>
     <spring-cloud.version>2025.1.3</spring-cloud.version>
     <springdoc.version>3.1.0</springdoc.version>
+    <azure-functions.java.library.version>3.3.0</azure-functions.java.library.version>
+    <azure-functions.java.core.version>1.3.0</azure-functions.java.core.version>
+    <azure-functions.maven.plugin.version>1.42.0</azure-functions.maven.plugin.version>
   </properties>
 
   <dependencyManagement>

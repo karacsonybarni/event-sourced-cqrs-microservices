@@ -30,6 +30,8 @@ flowchart LR
     Kafka -->|at-least-once| Projector[Idempotent projector]
     Projector --> QueryDB[(Query PostgreSQL<br/>denormalized views)]
     Query --> QueryDB
+    Kafka -. independent projection .-> ActivityFunction[Azure Function<br/>scale-to-zero consumer]
+    ActivityFunction --> ActivityDB[(Azure Cosmos DB<br/>order activity documents)]
     Kafka -. poison events .-> DLT[(Dead-letter topic)]
 ```
 
@@ -41,7 +43,8 @@ flowchart LR
 | `order-command-service` | Validates commands, replays aggregates, appends events | Event streams and command deduplication |
 | Debezium | Captures committed event inserts from PostgreSQL WAL | Replication offset and connector state |
 | `order-query-service` | Projects events and serves query-optimized responses | Order read model and processed-event IDs |
-| Kafka | Durable asynchronous transport | `orders.events.v1` and `orders.events.v1.DLT` |
+| `order-activity-function` | Builds an independently scalable activity timeline | Cosmos DB documents keyed by event and partitioned by order |
+| Kafka | Durable asynchronous transport | `orders.events.v1`, `orders.events.v1.DLT`, and `orders.events.v1.activity.DLT` |
 
 The write and read services share neither a database nor a Java model. Their integration contract is the versioned event envelope stored in `order_events` and emitted unchanged by Debezium.
 
@@ -65,6 +68,8 @@ make ui-smoke
 6. verify the read model advances from event version 1 to 2.
 
 `make scale-smoke` then stops every command and query replica in turn. It waits for Eureka to evict the stopped instance and proves that the gateway continues routing commands and queries to the surviving replica before restoring the full topology.
+
+The Maven reactor also packages `order-activity-function`, a Java 21 Azure Function that consumes the same Kafka event contract and writes an idempotent document projection to Azure Cosmos DB. It is an independent cloud extension rather than a dependency of the local order path. See [ADR-005](docs/adr/005-serverless-nosql-activity-projection.md) for its boundary and deployment trade-offs.
 
 Stop the stack and remove its local volumes with:
 
@@ -136,6 +141,7 @@ docker compose port --index 1 order-query-service 8082
 - **At-least-once delivery:** connector or consumer recovery can redeliver a record. `processed_events.event_id` makes projection replay harmless.
 - **Per-order ordering:** every event has a contiguous aggregate version and uses `orderId` as its Kafka key, preserving the partition-ordering boundary.
 - **Poison-event isolation:** projection failures retry twice and then move to `orders.events.v1.DLT`.
+- **Idempotent serverless projection:** the activity document ID is the immutable `eventId`, so Kafka redelivery overwrites the same document in the same order partition.
 - **Idempotent client retries:** PostgreSQL atomically claims `Idempotency-Key` and binds it to a deterministic request fingerprint.
 - **Honest eventual consistency:** query responses include `X-Data-Consistency: eventual`; a newly committed order may briefly be absent from the read side.
 
@@ -162,6 +168,8 @@ The test suite covers aggregate replay, versioned serialization, append-only dat
 - Spring Data JPA, Flyway, PostgreSQL 18
 - Debezium 3.6.1.Final PostgreSQL connector
 - Spring for Apache Kafka and Apache Kafka 4.3.1 in KRaft mode
+- Azure Functions Java library 3.3.0 and Maven plugin 1.42.0
+- Azure Cosmos DB for NoSQL document projection
 - springdoc-openapi 3.1.0
 - Micrometer Actuator and Prometheus metrics
 - Maven Wrapper, Docker Compose, GitHub Actions, Dependabot
@@ -176,6 +184,7 @@ discovery-server/        Eureka service registry
 frontend/                React customer portal and architecture proof
 order-command-service/  event-sourced aggregate, event store, command API
 order-query-service/    Kafka projection, read model, query API
+order-activity-function/ serverless Kafka-to-Cosmos activity projection
 debezium/                replication user and connector registration
 docs/                    architecture narrative and decisions
 scripts/                 end-to-end and multi-replica failover checks

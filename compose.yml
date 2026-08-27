@@ -105,6 +105,13 @@ services:
           --topic orders.events.v1.DLT \
           --partitions 3 \
           --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka:9092 \
+          --create \
+          --if-not-exists \
+          --topic orders.events.v1.activity.DLT \
+          --partitions 3 \
+          --replication-factor 1
 
   debezium:
     image: quay.io/debezium/connect:3.6.1.Final

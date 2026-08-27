@@ -82,6 +82,45 @@ sequenceDiagram
 
 The Kafka listener's database transaction includes both projection state and the processed-event record. The listener acknowledges only after that transaction returns. A redelivery after an acknowledgement failure becomes a no-op because `eventId` is already recorded.
 
+## Independent serverless activity projection
+
+The order event stream also supports a separately deployable activity projection. `order-activity-function` is a Java 21 Azure Function with a Kafka trigger and an Azure Cosmos DB output binding. Each invocation validates one versioned event envelope and writes an activity document with this shape:
+
+```json
+{
+  "id": "b67c1f1c-c391-4ef0-a1b2-c54bc632a4aa",
+  "orderId": "42989fcc-11b0-4c63-af36-533fdef5927b",
+  "eventType": "OrderCreated.v1",
+  "aggregateVersion": 1,
+  "occurredAt": "2026-01-10T10:15:30Z",
+  "payload": {
+    "customerId": "customer-42",
+    "status": "CREATED"
+  }
+}
+```
+
+Cosmos DB uses `/orderId` as the partition key, keeping one order's timeline in one logical partition. The immutable event ID is also the document ID. Azure Functions' Cosmos output binding replaces a document when the same ID and partition key are written again, which makes at-least-once Kafka delivery converge on one document per event.
+
+Transient execution failures retry indefinitely with exponential backoff capped at one minute between attempts, preserving the affected partition's offset until its dependency recovers. Invalid envelopes are published to `orders.events.v1.activity.DLT` so one poison event cannot stall its Kafka partition.
+
+This projection is an independent observer. Command handling and the primary query API retain their PostgreSQL ownership and availability when the Function or Cosmos DB is unavailable. The document model is appropriate for a schema-flexible timeline whose event-specific payload varies, while the relational query model remains appropriate for current-order searches and constraints.
+
+## Asynchronous messaging and cloud service models
+
+Kafka supplies the asynchronous messaging boundary. Producers and consumers are decoupled in time, retained records can be replayed, consumer groups track independent progress, and a partition key preserves per-order ordering. Azure Service Bus would add another broker and delivery hop without a separate messaging requirement, so the architecture uses one durable event backbone.
+
+The cloud artifacts map the common service models to concrete ownership boundaries:
+
+| Model | Project example | Current state | Responsibility boundary |
+| --- | --- | --- | --- |
+| IaaS | Azure Linux VM, virtual network, network interface, and managed disk | Public runtime | Azure operates physical infrastructure; the project operates the guest OS, Docker, and services |
+| PaaS / FaaS | Azure Blob Storage for Terraform state | Active deployment foundation | Azure operates the storage platform and durability mechanisms |
+| PaaS / FaaS | Azure Functions and Azure Cosmos DB for NoSQL | Packaged, opt-in projection | Azure operates the service runtime, scaling mechanism, patching, and document platform |
+| SaaS | GitHub repository and GitHub Actions | Active source-control and delivery platform | The project consumes source-control and CI/CD capabilities as hosted software |
+
+Azure Functions is the Azure equivalent of the event-driven compute model associated with AWS Lambda. A second Lambda implementation would duplicate the same handler without adding another business boundary.
+
 ## Server-side discovery and horizontal scaling
 
 External clients know only the gateway's stable address. Command and query instances self-register with Eureka and renew short-lived leases. The gateway resolves `lb://order-command-service` and `lb://order-query-service` through Spring Cloud LoadBalancer, so instance selection remains behind the router rather than in external clients.
@@ -143,6 +182,7 @@ The read model can be rebuilt by resetting its projection state and replaying `o
 | Attempted event update or delete | Database trigger aborts the statement | Correct with a compensating event, never history mutation |
 | One command or query replica stops | Eureka lease expires and the gateway refreshes its instance list | Traffic continues through the surviving replica |
 | Registry unavailable after clients have cached instances | Existing cache can serve temporarily; topology changes are not discovered | Restore the registry; run it redundantly outside local development |
+| Activity Function or Cosmos DB unavailable | The primary command and query paths continue; the affected activity partition pauses | The Kafka consumer group retries with exponential backoff until recovery; deterministic document IDs absorb redelivery |
 
 ## Cloud deployments and production path
 
