@@ -60,11 +60,30 @@ jobs:
           fi
 
           echo "Deploying Function App ${function_app_name} in ${RESOURCE_GROUP}."
-          az resource show \
-            --resource-group "${RESOURCE_GROUP}" \
-            --resource-type "Microsoft.Web/sites" \
-            --name "${function_app_name}" \
-            --output none
+          for attempt in {1..18}; do
+            if function_access_error="$(az resource show \
+              --resource-group "${RESOURCE_GROUP}" \
+              --resource-type "Microsoft.Web/sites" \
+              --name "${function_app_name}" \
+              --output none 2>&1)"; then
+              function_access_error=""
+              break
+            fi
+
+            if [[ "${function_access_error}" != *"AuthorizationFailed"* ]]; then
+              printf '%s\n' "${function_access_error}" >&2
+              exit 1
+            fi
+
+            if ((attempt == 18)); then
+              printf '%s\n' "${function_access_error}" >&2
+              echo "Azure Function deployment RBAC is not reconciled. Run scripts/azure/reconcile.sh with an Azure account that can manage role assignments." >&2
+              exit 1
+            fi
+
+            printf 'Waiting for Azure Function RBAC propagation (%d/18)\n' "${attempt}" >&2
+            sleep 10
+          done
 
           ./mvnw --batch-mode --no-transfer-progress -pl order-activity-function -am -DskipTests package
           cd order-activity-function/target/azure-functions/order-activity-function
