@@ -164,6 +164,11 @@ resource "azurerm_function_app_flex_consumption" "activity" {
   https_only                                     = true
   webdeploy_publish_basic_authentication_enabled = false
 
+  always_ready {
+    name           = "function:projectOrderActivity"
+    instance_count = 1
+  }
+
   identity {
     type         = "UserAssigned"
     identity_ids = [azurerm_user_assigned_identity.activity_function.id]
