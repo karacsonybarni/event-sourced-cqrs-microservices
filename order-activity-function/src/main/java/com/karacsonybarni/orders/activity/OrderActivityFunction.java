@@ -1,9 +1,8 @@
 package com.karacsonybarni.orders.activity;
 
+import com.microsoft.azure.functions.BrokerProtocol;
 import com.microsoft.azure.functions.ExecutionContext;
 import com.microsoft.azure.functions.OutputBinding;
-import com.microsoft.azure.functions.BrokerProtocol;
-import com.microsoft.azure.functions.annotation.CosmosDBOutput;
 import com.microsoft.azure.functions.annotation.ExponentialBackoffRetry;
 import com.microsoft.azure.functions.annotation.FunctionName;
 import com.microsoft.azure.functions.annotation.KafkaOutput;
@@ -13,7 +12,17 @@ import tools.jackson.databind.ObjectMapper;
 
 public class OrderActivityFunction {
 
-    private final OrderActivityDocumentMapper documentMapper = new OrderActivityDocumentMapper(new ObjectMapper());
+    private final OrderActivityDocumentMapper documentMapper;
+    private final OrderActivityStore activityStore;
+
+    public OrderActivityFunction() {
+        this(new OrderActivityDocumentMapper(new ObjectMapper()), CosmosOrderActivityStore.instance());
+    }
+
+    OrderActivityFunction(OrderActivityDocumentMapper documentMapper, OrderActivityStore activityStore) {
+        this.documentMapper = documentMapper;
+        this.activityStore = activityStore;
+    }
 
     @FunctionName("projectOrderActivity")
     @ExponentialBackoffRetry(
@@ -28,12 +37,6 @@ public class OrderActivityFunction {
                     consumerGroup = "order-activity-function-v1",
                     protocol = BrokerProtocol.PLAINTEXT,
                     dataType = "string") String serializedEvent,
-            @CosmosDBOutput(
-                    name = "activityDocument",
-                    databaseName = "%COSMOS_DATABASE_NAME%",
-                    containerName = "%COSMOS_CONTAINER_NAME%",
-                    connection = "CosmosConnection",
-                    partitionKey = "/orderId") OutputBinding<String> output,
             @KafkaOutput(
                     name = "deadLetterEvent",
                     topic = "orders.events.v1.activity.DLT",
@@ -43,8 +46,7 @@ public class OrderActivityFunction {
                     enableIdempotence = true) OutputBinding<String> deadLetterOutput,
             ExecutionContext context) {
         try {
-            String activityDocument = documentMapper.map(serializedEvent);
-            output.setValue(activityDocument);
+            activityStore.upsert(documentMapper.map(serializedEvent));
             context.getLogger().info("Projected an order event into the activity document model");
         } catch (IllegalArgumentException | JacksonException exception) {
             deadLetterOutput.setValue(serializedEvent);
