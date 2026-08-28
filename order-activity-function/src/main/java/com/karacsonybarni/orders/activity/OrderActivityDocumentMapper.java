@@ -2,12 +2,13 @@ package com.karacsonybarni.orders.activity;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.node.ObjectNode;
 
 final class OrderActivityDocumentMapper {
 
@@ -17,7 +18,7 @@ final class OrderActivityDocumentMapper {
         this.objectMapper = objectMapper;
     }
 
-    String map(String serializedEvent) throws JacksonException {
+    Map<String, Object> map(String serializedEvent) throws JacksonException {
         JsonNode envelope = objectMapper.readTree(serializedEvent);
         String eventId = requiredText(envelope, "eventId");
         String orderId = requiredText(envelope, "aggregateId");
@@ -44,14 +45,14 @@ final class OrderActivityDocumentMapper {
             throw new IllegalArgumentException("payload must be a JSON object");
         }
 
-        ObjectNode document = objectMapper.createObjectNode();
+        Map<String, Object> document = new LinkedHashMap<>();
         document.put("id", eventId);
         document.put("orderId", orderId);
         document.put("eventType", requiredText(envelope, "eventType"));
         document.put("aggregateVersion", aggregateVersion);
         document.put("occurredAt", occurredAt);
-        document.set("payload", payload.deepCopy());
-        return objectMapper.writeValueAsString(document);
+        document.put("payload", objectMapper.treeToValue(payload, Object.class));
+        return document;
     }
 
     private String requiredText(JsonNode node, String fieldName) {
