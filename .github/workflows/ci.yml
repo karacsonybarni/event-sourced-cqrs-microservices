@@ -19,11 +19,9 @@ jobs:
           fetch-depth: 0
       - name: Detect runtime changes
         id: integration
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.sha }}
         run: |
-          base_sha="${BASE_SHA}"
+          base_sha='${{ github.event.pull_request.base.sha || github.event.before }}'
+          head_sha='${{ github.sha }}'
           if [[ -z "${base_sha}" || "${base_sha}" == "0000000000000000000000000000000000000000" ]]; then
             base_sha="$(git rev-parse HEAD^ 2>/dev/null || true)"
           fi
@@ -34,7 +32,7 @@ jobs:
             exit 0
           fi
 
-          mapfile -t changed_files < <(git diff --name-only "${base_sha}" "${HEAD_SHA}")
+          mapfile -t changed_files < <(git diff --name-only "${base_sha}" "${head_sha}")
           printf 'Changed files:\n'
           printf '  %s\n' "${changed_files[@]}"
 
