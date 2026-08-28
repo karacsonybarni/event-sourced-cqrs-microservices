@@ -158,7 +158,6 @@ gh variable set AZURE_RESOURCE_GROUP --repo "${github_repository}" --body "${res
 gh variable set AZURE_SUBSCRIPTION_ID --repo "${github_repository}" --body "${subscription_id}"
 gh variable set AZURE_TENANT_ID --repo "${github_repository}" --body "${tenant_id}"
 gh variable set AZURE_VM_NAME --repo "${github_repository}" --body "${vm_name}"
-gh variable set PUBLIC_API_URL --repo "${github_repository}" --body "${public_api_url}"
 
 gh workflow run deploy-azure.yml --repo "${github_repository}" --ref main
 

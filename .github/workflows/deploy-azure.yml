@@ -24,7 +24,6 @@ jobs:
     timeout-minutes: 30
     environment:
       name: cloud
-      url: ${{ vars.PUBLIC_API_URL }}
     env:
       DEPLOY_REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
@@ -215,6 +214,7 @@ jobs:
             any(.[]; .name == "function:projectOrderActivity" and .instanceCount == 1)
           ' <<<"${always_ready}" >/dev/null
       - name: Deploy through Azure Run Command
+        id: runtime
         if: steps.freshness.outputs.deploy == 'true'
         env:
           RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
@@ -224,26 +224,32 @@ jobs:
             --resource-group "${RESOURCE_GROUP}" \
             --name "${VM_NAME}" \
             --command-id RunShellScript \
-            --scripts "sudo cloud-init status --wait && sudo /usr/local/bin/deploy-event-sourced-cqrs ${DEPLOY_REVISION} && printf 'AZURE_DEPLOYMENT_SUCCEEDED\\n'" \
+            --scripts "sudo cloud-init status --wait && sudo /usr/local/bin/deploy-event-sourced-cqrs ${DEPLOY_REVISION} && public_host=\"\$(sudo sed -n 's/^PUBLIC_HOST=//p' /etc/event-sourced-cqrs/runtime.env)\" && printf 'AZURE_PUBLIC_API_URL=https://%s\\n' \"\${public_host}\" && printf 'AZURE_DEPLOYMENT_SUCCEEDED\\n'" \
             --query 'value[].message' \
             --output tsv)"
           printf '%s\n' "${deployment_output}"
+          public_api_url="$(grep -oE 'AZURE_PUBLIC_API_URL=https://[A-Za-z0-9.-]+' <<<"${deployment_output}" | tail -1 | cut -d= -f2-)"
+          if [[ -z "${public_api_url}" ]]; then
+            echo "Azure runtime did not report its public endpoint." >&2
+            exit 1
+          fi
+          echo "public_api_url=${public_api_url}" >> "${GITHUB_OUTPUT}"
           grep --quiet '^AZURE_DEPLOYMENT_SUCCEEDED$' <<<"${deployment_output}"
       - name: Verify the public event-sourced CQRS flow
         if: steps.freshness.outputs.deploy == 'true'
         env:
-          GATEWAY_URL: ${{ vars.PUBLIC_API_URL }}
+          GATEWAY_URL: ${{ steps.runtime.outputs.public_api_url }}
           VERIFY_PLATFORM: "false"
         run: ./scripts/smoke-test.sh
       - name: Verify the public React order portal
         if: steps.freshness.outputs.deploy == 'true'
         env:
-          UI_URL: ${{ vars.PUBLIC_API_URL }}
+          UI_URL: ${{ steps.runtime.outputs.public_api_url }}
         run: ./scripts/ui-smoke-test.sh
       - name: Verify the public serverless NoSQL projection
         if: steps.freshness.outputs.deploy == 'true'
         env:
-          GATEWAY_URL: ${{ vars.PUBLIC_API_URL }}
+          GATEWAY_URL: ${{ steps.runtime.outputs.public_api_url }}
           RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
           VM_NAME: ${{ vars.AZURE_VM_NAME }}
         run: |
