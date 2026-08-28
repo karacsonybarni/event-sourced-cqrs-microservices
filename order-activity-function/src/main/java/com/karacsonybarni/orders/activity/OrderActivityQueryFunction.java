@@ -27,6 +27,7 @@ public class OrderActivityQueryFunction {
                     databaseName = "%COSMOS_DATABASE_NAME%",
                     containerName = "%COSMOS_CONTAINER_NAME%",
                     connection = "CosmosConnection",
+                    partitionKey = "{orderId}",
                     sqlQuery = "SELECT * FROM c WHERE c.orderId = {orderId} ORDER BY c.aggregateVersion ASC")
                     String[] activityDocuments) throws JacksonException {
         ArrayNode response = objectMapper.createArrayNode();
