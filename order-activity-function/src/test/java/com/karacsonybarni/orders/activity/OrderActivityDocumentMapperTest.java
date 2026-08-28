@@ -1,8 +1,9 @@
 package com.karacsonybarni.orders.activity;
 
+import java.util.Map;
+
 import org.junit.jupiter.api.Test;
 import tools.jackson.core.JacksonException;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -13,10 +14,10 @@ class OrderActivityDocumentMapperTest {
     private static final String EVENT_ID = "b67c1f1c-c391-4ef0-a1b2-c54bc632a4aa";
     private static final String ORDER_ID = "42989fcc-11b0-4c63-af36-533fdef5927b";
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    private final OrderActivityDocumentMapper mapper = new OrderActivityDocumentMapper(objectMapper);
+    private final OrderActivityDocumentMapper mapper = new OrderActivityDocumentMapper(new ObjectMapper());
 
     @Test
+    @SuppressWarnings("unchecked")
     void mapsTheVersionedEnvelopeToAnOrderPartitionedDocument() throws JacksonException {
         String event = """
                 {
@@ -34,15 +35,16 @@ class OrderActivityDocumentMapperTest {
                 }
                 """.formatted(EVENT_ID, ORDER_ID);
 
-        JsonNode document = objectMapper.readTree(mapper.map(event));
+        Map<String, Object> document = mapper.map(event);
 
-        assertThat(document.required("id").asString()).isEqualTo(EVENT_ID);
-        assertThat(document.required("orderId").asString()).isEqualTo(ORDER_ID);
-        assertThat(document.required("eventType").asString()).isEqualTo("OrderCreated.v1");
-        assertThat(document.required("aggregateVersion").asLong()).isEqualTo(1);
-        assertThat(document.required("occurredAt").asString()).isEqualTo("2026-01-10T10:15:30Z");
-        assertThat(document.required("payload").required("customerId").asString()).isEqualTo("customer-42");
-        assertThat(document.required("payload").required("status").asString()).isEqualTo("CREATED");
+        assertThat(document.get("id")).isEqualTo(EVENT_ID);
+        assertThat(document.get("orderId")).isEqualTo(ORDER_ID);
+        assertThat(document.get("eventType")).isEqualTo("OrderCreated.v1");
+        assertThat(document.get("aggregateVersion")).isEqualTo(1L);
+        assertThat(document.get("occurredAt")).isEqualTo("2026-01-10T10:15:30Z");
+        Map<String, Object> payload = (Map<String, Object>) document.get("payload");
+        assertThat(payload.get("customerId")).isEqualTo("customer-42");
+        assertThat(payload.get("status")).isEqualTo("CREATED");
     }
 
     @Test
@@ -61,10 +63,7 @@ class OrderActivityDocumentMapperTest {
                 }
                 """.formatted(EVENT_ID, ORDER_ID);
 
-        String firstDelivery = mapper.map(event);
-        String redelivery = mapper.map(event);
-
-        assertThat(redelivery).isEqualTo(firstDelivery);
+        assertThat(mapper.map(event)).isEqualTo(mapper.map(event));
     }
 
     @Test
