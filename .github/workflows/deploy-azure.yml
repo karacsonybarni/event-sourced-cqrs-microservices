@@ -192,25 +192,48 @@ jobs:
             any(.[]; .name == "function:projectOrderActivity" and .instanceCount == 1)
           ' <<<"${always_ready}" >/dev/null
 
-          function_host="$(az functionapp show \
+          function_host="$(az resource show \
             --resource-group "${RESOURCE_GROUP}" \
+            --resource-type "Microsoft.Web/sites" \
             --name "${function_app_name}" \
-            --query defaultHostName \
+            --query properties.defaultHostName \
             --output tsv)"
-          function_key="$(az functionapp keys list \
-            --resource-group "${RESOURCE_GROUP}" \
-            --name "${function_app_name}" \
-            --query 'functionKeys.default' \
-            --output tsv)"
-          if [[ -z "${function_key}" ]]; then
-            function_key="$(az functionapp keys list \
-              --resource-group "${RESOURCE_GROUP}" \
-              --name "${function_app_name}" \
-              --query masterKey \
-              --output tsv)"
+          if [[ -z "${function_host}" ]]; then
+            echo "Unable to resolve the deployed Function host for the Cosmos write probe." >&2
+            exit 1
           fi
-          if [[ -z "${function_host}" || -z "${function_key}" ]]; then
-            echo "Unable to resolve the deployed Function host or function key for the Cosmos write probe." >&2
+
+          function_keys_url="https://management.azure.com${function_app_resource_id}/functions/probeOrderActivityStore/listkeys?api-version=2025-03-01"
+          host_keys_url="https://management.azure.com${function_app_resource_id}/host/default/listkeys?api-version=2025-03-01"
+          function_key=""
+          for attempt in {1..12}; do
+            function_key="$(az rest \
+              --method post \
+              --url "${function_keys_url}" \
+              --query 'default' \
+              --output tsv 2>/dev/null || true)"
+            if [[ -z "${function_key}" ]]; then
+              function_key="$(az rest \
+                --method post \
+                --url "${host_keys_url}" \
+                --query 'functionKeys.default' \
+                --output tsv 2>/dev/null || true)"
+            fi
+            if [[ -z "${function_key}" ]]; then
+              function_key="$(az rest \
+                --method post \
+                --url "${host_keys_url}" \
+                --query masterKey \
+                --output tsv 2>/dev/null || true)"
+            fi
+            if [[ -n "${function_key}" ]]; then
+              break
+            fi
+            printf 'Waiting for protected Function probe key (%d/12)\n' "${attempt}" >&2
+            sleep 10
+          done
+          if [[ -z "${function_key}" ]]; then
+            echo "Unable to resolve a protected Function key for the Cosmos write probe after retries." >&2
             exit 1
           fi
           echo "::add-mask::${function_key}"
