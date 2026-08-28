@@ -116,8 +116,13 @@ run "cost_controlled_cloud_topology" {
   }
 
   assert {
-    condition     = azurerm_function_app_flex_consumption.activity.maximum_instance_count == 2 && length(azurerm_function_app_flex_consumption.activity.always_ready) == 0
-    error_message = "The Function must scale to zero and cap burst scale at two instances."
+    condition = (
+      azurerm_function_app_flex_consumption.activity.maximum_instance_count == 2 &&
+      length(azurerm_function_app_flex_consumption.activity.always_ready) == 1 &&
+      one(azurerm_function_app_flex_consumption.activity.always_ready).name == "function:projectOrderActivity" &&
+      one(azurerm_function_app_flex_consumption.activity.always_ready).instance_count == 1
+    )
+    error_message = "The Function must keep only the Kafka projection always ready and cap burst scale at two instances."
   }
 
   assert {
