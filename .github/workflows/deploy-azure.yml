@@ -210,7 +210,7 @@ jobs:
             function_key="$(az rest \
               --method post \
               --url "${function_keys_url}" \
-              --query 'default' \
+              --query 'properties.default' \
               --output tsv 2>/dev/null || true)"
             if [[ -z "${function_key}" ]]; then
               function_key="$(az rest \
