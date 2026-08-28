@@ -32,6 +32,7 @@ class OrderActivityQueryFunctionTest {
         assertThat(input.databaseName()).isEqualTo("%COSMOS_DATABASE_NAME%");
         assertThat(input.containerName()).isEqualTo("%COSMOS_CONTAINER_NAME%");
         assertThat(input.connection()).isEqualTo("CosmosConnection");
+        assertThat(input.partitionKey()).isEqualTo("{orderId}");
         assertThat(input.sqlQuery())
                 .isEqualTo("SELECT * FROM c WHERE c.orderId = {orderId} ORDER BY c.aggregateVersion ASC");
     }
