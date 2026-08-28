@@ -81,11 +81,14 @@ run "cost_controlled_cloud_topology" {
 
   assert {
     condition = (
+      azurerm_network_security_rule.function_kafka.direction == "Inbound" &&
+      azurerm_network_security_rule.function_kafka.access == "Allow" &&
+      azurerm_network_security_rule.function_kafka.protocol == "Tcp" &&
       azurerm_network_security_rule.function_kafka.source_address_prefix == azurerm_subnet.functions.address_prefixes[0] &&
       azurerm_network_security_rule.function_kafka.destination_address_prefix == "10.42.1.4" &&
       azurerm_network_security_rule.function_kafka.destination_port_range == "9094"
     )
-    error_message = "The Function subnet must reach only the VM Kafka VNET listener on 10.42.1.4:9094."
+    error_message = "The Function subnet must explicitly allow the VM Kafka VNET listener on 10.42.1.4:9094."
   }
 
   assert {
