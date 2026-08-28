@@ -15,4 +15,3 @@ docker-data/
 *.tfvars
 !*.tfvars.example
 crash.log
-.runtime/

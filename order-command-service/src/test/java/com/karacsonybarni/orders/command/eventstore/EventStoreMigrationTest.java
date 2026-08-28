@@ -101,6 +101,11 @@ class EventStoreMigrationTest {
                 "SELECT event_type FROM order_events WHERE aggregate_id = ?",
                 String.class,
                 postCutoverOrderId)).containsExactly("OrderCreated.v1");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT activation_at
+                FROM saga_configuration
+                WHERE configuration_key = 'inventory-saga-activation'
+                """, Instant.class)).isEqualTo(Instant.parse("2026-01-11T00:00:00Z"));
     }
 
     private void insertCreatedStream(JdbcTemplate jdbcTemplate, UUID orderId, Instant occurredAt) {
