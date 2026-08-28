@@ -1,15 +1,18 @@
 package com.karacsonybarni.orders.activity;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 import com.microsoft.azure.functions.BrokerProtocol;
 import com.microsoft.azure.functions.OutputBinding;
-import com.microsoft.azure.functions.annotation.CosmosDBOutput;
 import com.microsoft.azure.functions.annotation.ExponentialBackoffRetry;
 import com.microsoft.azure.functions.annotation.FunctionName;
 import com.microsoft.azure.functions.annotation.KafkaOutput;
 import com.microsoft.azure.functions.annotation.KafkaTrigger;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -19,11 +22,10 @@ class OrderActivityFunctionTest {
     private static final String ORDER_ID = "42989fcc-11b0-4c63-af36-533fdef5927b";
 
     @Test
-    void declaresKafkaAsItsTriggerAndCosmosDbAsItsOutput() throws NoSuchMethodException {
+    void declaresKafkaAsItsTriggerAndDeadLetterOutput() throws NoSuchMethodException {
         Method function = OrderActivityFunction.class.getMethod(
                 "project",
                 String.class,
-                OutputBinding.class,
                 OutputBinding.class,
                 com.microsoft.azure.functions.ExecutionContext.class);
 
@@ -34,13 +36,7 @@ class OrderActivityFunctionTest {
         assertThat(trigger.consumerGroup()).isEqualTo("order-activity-function-v1");
         assertThat(trigger.protocol()).isEqualTo(BrokerProtocol.PLAINTEXT);
 
-        CosmosDBOutput output = function.getParameters()[1].getAnnotation(CosmosDBOutput.class);
-        assertThat(output.databaseName()).isEqualTo("%COSMOS_DATABASE_NAME%");
-        assertThat(output.containerName()).isEqualTo("%COSMOS_CONTAINER_NAME%");
-        assertThat(output.connection()).isEqualTo("CosmosConnection");
-        assertThat(output.partitionKey()).isEqualTo("/orderId");
-
-        KafkaOutput deadLetter = function.getParameters()[2].getAnnotation(KafkaOutput.class);
+        KafkaOutput deadLetter = function.getParameters()[1].getAnnotation(KafkaOutput.class);
         assertThat(deadLetter.topic()).isEqualTo("orders.events.v1.activity.DLT");
         assertThat(deadLetter.brokerList()).isEqualTo("%KAFKA_BROKERS%");
         assertThat(deadLetter.protocol()).isEqualTo(BrokerProtocol.PLAINTEXT);
@@ -64,14 +60,17 @@ class OrderActivityFunctionTest {
                   "payload": {"status": "CREATED"}
                 }
                 """.formatted(EVENT_ID, ORDER_ID);
-        var output = new CapturingOutputBinding();
+        var store = new CapturingActivityStore();
         var deadLetterOutput = new CapturingOutputBinding();
-        var context = new TestExecutionContext();
+        var function = new OrderActivityFunction(
+                new OrderActivityDocumentMapper(new ObjectMapper()),
+                store);
 
-        new OrderActivityFunction().project(event, output, deadLetterOutput, context);
+        function.project(event, deadLetterOutput, new TestExecutionContext());
 
-        assertThat(output.getValue()).contains("\"id\":\"" + EVENT_ID + "\"");
-        assertThat(output.getValue()).contains("\"orderId\":\"" + ORDER_ID + "\"");
+        assertThat(store.documents).hasSize(1);
+        assertThat(store.documents.getFirst().get("id")).isEqualTo(EVENT_ID);
+        assertThat(store.documents.getFirst().get("orderId")).isEqualTo(ORDER_ID);
         assertThat(deadLetterOutput.getValue()).isNull();
     }
 
@@ -87,21 +86,33 @@ class OrderActivityFunctionTest {
                   "payload": {}
                 }
                 """.formatted(EVENT_ID, ORDER_ID);
-        var output = new CapturingOutputBinding();
+        var store = new CapturingActivityStore();
         var deadLetterOutput = new CapturingOutputBinding();
+        var function = new OrderActivityFunction(
+                new OrderActivityDocumentMapper(new ObjectMapper()),
+                store);
 
-        new OrderActivityFunction().project(
-                invalidEvent,
-                output,
-                deadLetterOutput,
-                new TestExecutionContext());
+        function.project(invalidEvent, deadLetterOutput, new TestExecutionContext());
 
-        assertThat(output.getValue()).isNull();
+        assertThat(store.documents).isEmpty();
         assertThat(deadLetterOutput.getValue()).isEqualTo(invalidEvent);
     }
 
-    private static final class CapturingOutputBinding implements OutputBinding<String> {
+    private static final class CapturingActivityStore implements OrderActivityStore {
+        private final List<Map<String, Object>> documents = new ArrayList<>();
 
+        @Override
+        public void upsert(Map<String, Object> document) {
+            documents.add(document);
+        }
+
+        @Override
+        public List<Map<String, Object>> findByOrderId(String orderId) {
+            return List.of();
+        }
+    }
+
+    private static final class CapturingOutputBinding implements OutputBinding<String> {
         private String value;
 
         @Override
@@ -116,7 +127,6 @@ class OrderActivityFunctionTest {
     }
 
     private static final class TestExecutionContext implements com.microsoft.azure.functions.ExecutionContext {
-
         @Override
         public java.util.logging.Logger getLogger() {
             return java.util.logging.Logger.getLogger(OrderActivityFunctionTest.class.getName());
