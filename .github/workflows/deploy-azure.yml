@@ -27,30 +27,50 @@ jobs:
     env:
       DEPLOY_REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
-      - name: Ignore superseded automatic deployments
+      - name: Resolve latest validated deployment revision
         id: freshness
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            printf 'Deploying manually selected revision %s.\n' "${DEPLOY_REVISION}"
+            echo "revision=${DEPLOY_REVISION}" >> "${GITHUB_OUTPUT}"
             echo "deploy=true" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
-          main_sha="$(gh api \
+          resolved_revision="${DEPLOY_REVISION}"
+          latest_successful_revision="$(gh api \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" \
-            --jq '.object.sha')"
-          if [[ "${DEPLOY_REVISION}" == "${main_sha}" ]]; then
-            echo "deploy=true" >> "${GITHUB_OUTPUT}"
-          else
-            printf 'Skipping superseded Azure deployment for %s; main is %s.\n' "${DEPLOY_REVISION}" "${main_sha}"
-            echo "deploy=false" >> "${GITHUB_OUTPUT}"
+            "repos/${GITHUB_REPOSITORY}/actions/runs?event=push&branch=main&status=completed&per_page=100" \
+            --jq '[.workflow_runs[] | select(.name == "CI" and .head_branch == "main" and .conclusion == "success")][0].head_sha // ""' \
+            2>/dev/null || true)"
+
+          if [[ -n "${latest_successful_revision}" && "${latest_successful_revision}" != "${DEPLOY_REVISION}" ]]; then
+            revision_relation="$(gh api \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "repos/${GITHUB_REPOSITORY}/compare/${DEPLOY_REVISION}...${latest_successful_revision}" \
+              --jq '.status' \
+              2>/dev/null || true)"
+            if [[ "${revision_relation}" == "ahead" ]]; then
+              resolved_revision="${latest_successful_revision}"
+            else
+              printf 'Keeping triggering validated revision %s; candidate %s was not proven newer (relation: %s).\n' \
+                "${DEPLOY_REVISION}" "${latest_successful_revision}" "${revision_relation:-unknown}" >&2
+            fi
           fi
+
+          if [[ "${resolved_revision}" != "${DEPLOY_REVISION}" ]]; then
+            printf 'Deploying newer validated main revision %s instead of triggering revision %s.\n' \
+              "${resolved_revision}" "${DEPLOY_REVISION}"
+          fi
+          echo "DEPLOY_REVISION=${resolved_revision}" >> "${GITHUB_ENV}"
+          echo "revision=${resolved_revision}" >> "${GITHUB_OUTPUT}"
+          echo "deploy=true" >> "${GITHUB_OUTPUT}"
       - uses: actions/checkout@v6
         if: steps.freshness.outputs.deploy == 'true'
         with:
-          ref: ${{ env.DEPLOY_REVISION }}
+          ref: ${{ steps.freshness.outputs.revision }}
       - name: Configure short-lived Azure credentials
         if: steps.freshness.outputs.deploy == 'true'
         uses: azure/login@v3.0.0
