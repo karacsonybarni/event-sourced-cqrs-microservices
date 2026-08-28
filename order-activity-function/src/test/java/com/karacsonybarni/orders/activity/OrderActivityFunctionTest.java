@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrderActivityFunctionTest {
 
@@ -50,16 +51,7 @@ class OrderActivityFunctionTest {
 
     @Test
     void usesTheEventIdAsTheStableCosmosDocumentId() {
-        String event = """
-                {
-                  "eventId": "%s",
-                  "eventType": "OrderCreated.v1",
-                  "aggregateId": "%s",
-                  "aggregateVersion": 1,
-                  "occurredAt": "2026-01-10T10:15:30Z",
-                  "payload": {"status": "CREATED"}
-                }
-                """.formatted(EVENT_ID, ORDER_ID);
+        String event = validEvent();
         var store = new CapturingActivityStore();
         var deadLetterOutput = new CapturingOutputBinding();
         var function = new OrderActivityFunction(
@@ -98,12 +90,52 @@ class OrderActivityFunctionTest {
         assertThat(deadLetterOutput.getValue()).isEqualTo(invalidEvent);
     }
 
+    @Test
+    void propagatesPersistenceFailuresInsteadOfDeadLetteringValidEvents() {
+        String event = validEvent();
+        var deadLetterOutput = new CapturingOutputBinding();
+        var function = new OrderActivityFunction(
+                new OrderActivityDocumentMapper(new ObjectMapper()),
+                new FailingActivityStore());
+
+        assertThatThrownBy(() -> function.project(event, deadLetterOutput, new TestExecutionContext()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("simulated Cosmos persistence failure");
+
+        assertThat(deadLetterOutput.getValue()).isNull();
+    }
+
+    private static String validEvent() {
+        return """
+                {
+                  "eventId": "%s",
+                  "eventType": "OrderCreated.v1",
+                  "aggregateId": "%s",
+                  "aggregateVersion": 1,
+                  "occurredAt": "2026-01-10T10:15:30Z",
+                  "payload": {"status": "CREATED"}
+                }
+                """.formatted(EVENT_ID, ORDER_ID);
+    }
+
     private static final class CapturingActivityStore implements OrderActivityStore {
         private final List<Map<String, Object>> documents = new ArrayList<>();
 
         @Override
         public void upsert(Map<String, Object> document) {
             documents.add(document);
+        }
+
+        @Override
+        public List<Map<String, Object>> findByOrderId(String orderId) {
+            return List.of();
+        }
+    }
+
+    private static final class FailingActivityStore implements OrderActivityStore {
+        @Override
+        public void upsert(Map<String, Object> document) {
+            throw new IllegalArgumentException("simulated Cosmos persistence failure");
         }
 
         @Override
