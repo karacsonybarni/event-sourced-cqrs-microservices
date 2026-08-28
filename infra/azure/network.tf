@@ -72,6 +72,20 @@ resource "azurerm_network_security_rule" "https" {
   network_security_group_name = azurerm_network_security_group.runtime.name
 }
 
+resource "azurerm_network_security_rule" "function_kafka" {
+  name                        = "Allow-Function-Kafka"
+  priority                    = 120
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "9094"
+  source_address_prefix       = azurerm_subnet.functions.address_prefixes[0]
+  destination_address_prefix  = "10.42.1.4"
+  resource_group_name         = azurerm_resource_group.runtime.name
+  network_security_group_name = azurerm_network_security_group.runtime.name
+}
+
 resource "azurerm_public_ip" "runtime" {
   name                = "${local.name_prefix}-ip"
   location            = azurerm_resource_group.runtime.location
