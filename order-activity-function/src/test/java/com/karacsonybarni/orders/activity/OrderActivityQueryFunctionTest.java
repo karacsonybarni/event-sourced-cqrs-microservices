@@ -2,6 +2,7 @@ package com.karacsonybarni.orders.activity;
 
 import java.lang.reflect.Method;
 
+import com.microsoft.azure.functions.HttpMethod;
 import com.microsoft.azure.functions.HttpRequestMessage;
 import com.microsoft.azure.functions.annotation.AuthorizationLevel;
 import com.microsoft.azure.functions.annotation.BindingName;
@@ -25,7 +26,27 @@ class OrderActivityQueryFunctionTest {
 
         HttpTrigger trigger = function.getParameters()[0].getAnnotation(HttpTrigger.class);
         assertThat(trigger.authLevel()).isEqualTo(AuthorizationLevel.ANONYMOUS);
+        assertThat(trigger.methods()).containsExactly(HttpMethod.GET);
         assertThat(trigger.route()).isEqualTo("activity/{orderId:guid}");
+
+        BindingName orderId = function.getParameters()[1].getAnnotation(BindingName.class);
+        assertThat(orderId.value()).isEqualTo("orderId");
+    }
+
+    @Test
+    void protectsTheCosmosWriteProbeWithAFunctionKey() throws NoSuchMethodException {
+        Method function = OrderActivityQueryFunction.class.getMethod(
+                "probeOrderActivityStore",
+                HttpRequestMessage.class,
+                String.class,
+                com.microsoft.azure.functions.ExecutionContext.class);
+
+        assertThat(function.getAnnotation(FunctionName.class).value()).isEqualTo("probeOrderActivityStore");
+
+        HttpTrigger trigger = function.getParameters()[0].getAnnotation(HttpTrigger.class);
+        assertThat(trigger.authLevel()).isEqualTo(AuthorizationLevel.FUNCTION);
+        assertThat(trigger.methods()).containsExactly(HttpMethod.POST);
+        assertThat(trigger.route()).isEqualTo("activity-probe/{orderId:guid}");
 
         BindingName orderId = function.getParameters()[1].getAnnotation(BindingName.class);
         assertThat(orderId.value()).isEqualTo("orderId");
