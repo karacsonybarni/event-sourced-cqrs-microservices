@@ -13,8 +13,12 @@ import com.azure.cosmos.models.PartitionKey;
 import com.azure.cosmos.models.SqlParameter;
 import com.azure.cosmos.models.SqlQuerySpec;
 import com.azure.identity.ManagedIdentityCredentialBuilder;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 final class CosmosOrderActivityStore implements OrderActivityStore {
+
+    private static final ObjectMapper COSMOS_OBJECT_MAPPER = new ObjectMapper();
 
     private static final class Holder {
         private static final CosmosOrderActivityStore INSTANCE = fromEnvironment();
@@ -54,8 +58,9 @@ final class CosmosOrderActivityStore implements OrderActivityStore {
     @Override
     public void upsert(Map<String, Object> document) {
         String orderId = requiredDocumentValue(document, "orderId");
+        ObjectNode cosmosDocument = COSMOS_OBJECT_MAPPER.valueToTree(document);
         container.upsertItem(
-                document,
+                cosmosDocument,
                 new PartitionKey(orderId),
                 new CosmosItemRequestOptions());
     }
