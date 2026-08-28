@@ -16,12 +16,13 @@
   <version>1.0.0-SNAPSHOT</version>
   <packaging>pom</packaging>
   <name>Event-Sourced CQRS Microservices</name>
-  <description>CQRS microservices with event sourcing and Debezium change data capture</description>
+  <description>CQRS microservices with event sourcing, saga choreography, and Debezium change data capture</description>
 
   <modules>
     <module>discovery-server</module>
     <module>api-gateway</module>
     <module>order-command-service</module>
+    <module>inventory-service</module>
     <module>order-query-service</module>
     <module>order-activity-function</module>
   </modules>

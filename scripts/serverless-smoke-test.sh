@@ -9,10 +9,19 @@ create_response="$(curl --fail-with-body --silent --show-error \
   --request POST \
   --header 'Content-Type: application/json' \
   --header "Idempotency-Key: ${idempotency_key}" \
-  --data "{\"customerId\":\"${customer_id}\",\"items\":[{\"productId\":\"serverless-proof\",\"quantity\":1,\"unitPrice\":1.00}]}" \
+  --data "{\"customerId\":\"${customer_id}\",\"items\":[{\"productId\":\"monitor\",\"quantity\":1,\"unitPrice\":1.00}]}" \
   "${gateway_url}/api/orders")"
 order_id="$(jq -er '.orderId' <<<"${create_response}")"
 printf 'Waiting for serverless activity projection for order %s\n' "${order_id}"
+
+for _ in {1..60}; do
+  order_view="$(curl --silent "${gateway_url}/api/orders/${order_id}")"
+  if jq -e '.status == "CONFIRMED" and .version == 2' <<<"${order_view}" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+jq -e '.status == "CONFIRMED" and .version == 2' <<<"${order_view}" >/dev/null
 
 curl --fail-with-body --silent --show-error \
   --request PUT \
@@ -37,11 +46,13 @@ for _ in {1..120}; do
     last_curl_error=""
     if [[ "${http_status}" == "200" ]] &&
         jq -e '
-          length == 2 and
+          length == 3 and
           .[0].eventType == "OrderCreated.v1" and
           .[0].aggregateVersion == 1 and
-          .[1].eventType == "OrderCancelled.v1" and
-          .[1].aggregateVersion == 2
+          .[1].eventType == "OrderConfirmed.v1" and
+          .[1].aggregateVersion == 2 and
+          .[2].eventType == "OrderCancelled.v1" and
+          .[2].aggregateVersion == 3
         ' <<<"${last_activity}" >/dev/null 2>&1; then
       printf 'Serverless Kafka-to-Cosmos activity projection verified for order %s\n' "${order_id}"
       exit 0

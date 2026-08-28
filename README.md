@@ -7,9 +7,9 @@
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk)](https://adoptium.net/)
 [![Debezium](https://img.shields.io/badge/Debezium-3.6.1.Final-2C4F7C)](https://debezium.io/)
 
-A runnable reference architecture combining a React customer portal, Command Query Responsibility Segregation (CQRS), event sourcing, Debezium change data capture, registry-backed service discovery, and horizontal scaling. The command database stores immutable domain events as the source of truth, Debezium streams committed inserts to Kafka, and replicated query services build and serve a disposable read model.
+A runnable reference architecture combining a React customer portal, Command Query Responsibility Segregation (CQRS), selective event sourcing, a choreographed Order–Inventory saga, Debezium change data capture, registry-backed service discovery, and horizontal scaling. Order and inventory-reservation lifecycles are immutable event streams, Debezium publishes committed inserts to Kafka, and replicated query services build and serve a disposable read model.
 
-The design follows the pattern language at [microservices.io](https://microservices.io/patterns/microservices.html), especially [Event Sourcing](https://microservices.io/patterns/data/event-sourcing.html), [CQRS](https://microservices.io/patterns/data/cqrs.html), [Database per Service](https://microservices.io/patterns/data/database-per-service.html), [API Gateway](https://microservices.io/patterns/apigateway.html), and [Idempotent Consumer](https://microservices.io/patterns/communication-style/idempotent-consumer.html).
+The design follows the pattern language at [microservices.io](https://microservices.io/patterns/microservices.html), especially [Event Sourcing](https://microservices.io/patterns/data/event-sourcing.html), [Saga](https://microservices.io/patterns/data/saga.html), [CQRS](https://microservices.io/patterns/data/cqrs.html), [Database per Service](https://microservices.io/patterns/data/database-per-service.html), [API Gateway](https://microservices.io/patterns/apigateway.html), and [Idempotent Consumer](https://microservices.io/patterns/communication-style/idempotent-consumer.html).
 
 ## Architecture at a glance
 
@@ -21,6 +21,7 @@ flowchart LR
     Registry[Eureka<br/>Service Registry]
     Gateway <-->|discover instances| Registry
     Command[Order Command Service<br/>2 replicas] -->|self-register| Registry
+    Inventory[Inventory Service] -->|self-register| Registry
     Query[Order Query Service<br/>2 replicas] -->|self-register| Registry
     Gateway -->|lb:// POST / PUT| Command
     Gateway -->|lb:// GET| Query
@@ -28,6 +29,10 @@ flowchart LR
     Command -->|append in one ACID transaction| EventStore[(Command PostgreSQL<br/>append-only event store)]
     EventStore -->|logical replication / WAL| Debezium[Debezium<br/>PostgreSQL connector]
     Debezium -->|versioned envelope<br/>keyed by orderId| Kafka{{Apache Kafka}}
+    Kafka -->|OrderCreated / OrderCancelled| Inventory
+    Inventory -->|lock and adjust| InventoryDB[(Inventory PostgreSQL<br/>stock + reservation events)]
+    InventoryDB -->|logical replication / WAL| Debezium
+    Kafka -->|InventoryReserved / Rejected| Command
     Kafka -->|at-least-once| Projector[Idempotent projector]
     Projector --> QueryDB[(Query PostgreSQL<br/>denormalized views)]
     Query --> QueryDB
@@ -42,12 +47,13 @@ flowchart LR
 | `api-gateway` | Method-aware routing and correlation IDs | None |
 | `discovery-server` | Instance registry and health-aware service lookup | Registry leases |
 | `order-command-service` | Validates commands, replays aggregates, appends events | Event streams and command deduplication |
+| `inventory-service` | Reserves stock, rejects unavailable orders, and compensates cancellation | Transactional stock plus event-sourced reservation streams |
 | Debezium | Captures committed event inserts from PostgreSQL WAL | Replication offset and connector state |
 | `order-query-service` | Projects events and serves query-optimized responses | Order read model and processed-event IDs |
 | `order-activity-function` | Builds an independently scalable activity timeline | Cosmos DB documents keyed by event and partitioned by order |
-| Kafka | Durable asynchronous transport | `orders.events.v1`, `orders.events.v1.DLT`, and `orders.events.v1.activity.DLT` |
+| Kafka | Durable asynchronous transport | Order and inventory event topics plus consumer-specific dead-letter topics |
 
-The write and read services share neither a database nor a Java model. Their integration contract is the versioned event envelope stored in `order_events` and emitted unchanged by Debezium.
+The services share neither databases nor Java domain models. Their integration contracts are versioned envelopes stored in `order_events` and `inventory_events` and emitted unchanged by Debezium.
 
 ## Run the complete system
 
@@ -59,16 +65,17 @@ make smoke
 make ui-smoke
 ```
 
-`make up` compiles the services, builds the React application, starts PostgreSQL, Kafka, Debezium, Eureka, the gateway, the order portal, two command-service replicas, and two query-service replicas, registers the connector idempotently, and waits for health checks. Open [http://localhost:3000](http://localhost:3000) or run `make ui-smoke` to verify the local UI. `make smoke` proves this flow through the gateway:
+`make up` compiles the services, builds the React application, starts three PostgreSQL databases, Kafka, Debezium, Eureka, the gateway, Inventory, the order portal, two command-service replicas, and two query-service replicas, registers both CDC connectors idempotently, and waits for health checks. Open [http://localhost:3000](http://localhost:3000) or run `make ui-smoke` to verify the local UI. `make smoke` proves this flow through the gateway:
 
 1. create an order;
 2. repeat the same command and verify idempotent replay;
 3. reuse the key with another payload and verify `409 Conflict`;
-4. wait for Debezium and Kafka to update the query model;
-5. cancel the order; and
-6. verify the read model advances from event version 1 to 2.
+4. wait for Inventory to reserve stock and the order to reach `CONFIRMED` at version 2;
+5. cancel the order and verify `InventoryReleased.v1` restores the stock balance;
+6. verify the read model reaches `CANCELLED` at version 3; and
+7. create an unavailable order and verify it reaches `REJECTED` without reducing stock.
 
-The Azure image enables a seventh portal proof that independently verifies both lifecycle events in Cosmos DB through the read-only Function route. The local image omits this cloud-only step while retaining the complete event-sourced CQRS flow.
+The Azure image enables an additional portal proof that independently verifies the created, confirmed, and cancelled order events in Cosmos DB through the read-only Function route. The local image omits this cloud-only step while retaining the complete saga and CQRS flow.
 
 `make scale-smoke` then stops every command and query replica in turn. It waits for Eureka to evict the stopped instance and proves that the gateway continues routing commands and queries to the surviving replica before restoring the full topology.
 
@@ -107,8 +114,8 @@ curl --request POST http://localhost:8080/api/orders \
   --data '{
     "customerId": "customer-42",
     "items": [
-      {"productId": "keyboard", "quantity": 1, "unitPrice": 129.90},
-      {"productId": "mouse", "quantity": 2, "unitPrice": 39.50}
+      {"productId": "mechanical-keyboard", "quantity": 1, "unitPrice": 129.90},
+      {"productId": "wireless-mouse", "quantity": 2, "unitPrice": 39.50}
     ]
   }'
 ```
@@ -124,7 +131,7 @@ curl 'http://localhost:8080/api/orders?customerId=customer-42&status=CANCELLED'
 Operational endpoints:
 
 - Eureka registry: [http://localhost:8761](http://localhost:8761)
-- Debezium Connect: [http://localhost:8083/connectors/order-events/status](http://localhost:8083/connectors/order-events/status)
+- Debezium Connect: [order connector](http://localhost:8083/connectors/order-events/status) and [inventory connector](http://localhost:8083/connectors/inventory-events/status)
 - Gateway health: [http://localhost:8080/actuator/health](http://localhost:8080/actuator/health)
 - Prometheus metrics: `/actuator/prometheus` on every Spring service
 
@@ -133,22 +140,26 @@ Backend replicas receive random host ports so they can scale without collisions.
 ```bash
 docker compose port --index 1 order-command-service 8081
 docker compose port --index 1 order-query-service 8082
+docker compose port inventory-service 8084
 ```
 
 ## Event-sourcing and delivery guarantees
 
 - **Events are authoritative:** an `Order` is reconstructed by replaying its ordered event stream; no mutable order table exists.
+- **Selective event sourcing:** an `InventoryReservation` is reconstructed from reserved/rejected/released events, while the high-contention stock balance remains explicit transactional state.
 - **Append-only enforcement:** PostgreSQL rejects `UPDATE` and `DELETE` against `order_events`, and a unique `(aggregate_id, aggregate_version)` constraint rejects conflicting stream positions.
 - **Optimistic stream version plus row serialization:** `aggregate_streams.current_version` is concurrency metadata. A row lock serializes concurrent transitions while the event history remains the source of aggregate state.
-- **No application-level database/Kafka dual write:** the command transaction ends after appending the event. Debezium reads only committed WAL changes and owns publication to Kafka.
-- **At-least-once delivery:** connector or consumer recovery can redeliver a record. `processed_events.event_id` makes projection replay harmless.
+- **Local saga atomicity:** inventory changes stock and appends its reservation event in one database transaction; Order and Inventory never share a transaction.
+- **No application-level database/Kafka dual write:** each domain transaction ends after appending its event. Debezium reads only committed WAL changes and owns publication to Kafka.
+- **At-least-once delivery:** connector or consumer recovery can redeliver a record. Consumer inbox tables and projection `processed_events` make replay harmless.
+- **Explicit compensation:** `OrderCancelled.v1` releases an active reservation and appends `InventoryReleased.v1`; history is never edited.
 - **Per-order ordering:** every event has a contiguous aggregate version and uses `orderId` as its Kafka key, preserving the partition-ordering boundary.
 - **Poison-event isolation:** projection failures retry twice and then move to `orders.events.v1.DLT`.
 - **Idempotent serverless projection:** the activity document ID is the immutable `eventId`, so Kafka redelivery overwrites the same document in the same order partition.
 - **Idempotent client retries:** PostgreSQL atomically claims `Idempotency-Key` and binds it to a deterministic request fingerprint.
 - **Honest eventual consistency:** query responses include `X-Data-Consistency: eventual`; a newly committed order may briefly be absent from the read side.
 
-See [Architecture](docs/architecture.md) for the detailed mechanics and [ADR-001](docs/adr/001-event-sourcing-and-debezium-cdc.md) for the main trade-offs.
+See [Architecture](docs/architecture.md), [ADR-001](docs/adr/001-event-sourcing-and-debezium-cdc.md), and [ADR-006](docs/adr/006-choreographed-order-inventory-saga.md) for the detailed mechanics and trade-offs.
 
 ## Verification
 
@@ -161,7 +172,7 @@ make scale-smoke
 GATEWAY_URL=https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com ./scripts/serverless-smoke-test.sh
 ```
 
-The test suite covers aggregate replay, versioned serialization, append-only database enforcement, concurrent create/cancel commands, idempotent command fingerprints, duplicate event delivery, stale projection versions, dead-letter routing, API behavior, gateway correlation IDs, and load-balanced route configuration. The smoke tests add real PostgreSQL logical decoding, Debezium, Kafka, Eureka registration, two replicas of each business service, instance eviction, failover, both databases, Flyway, and all HTTP services.
+The test suite covers both aggregate lifecycles, versioned serialization, append-only database enforcement, stock reservation and compensation, concurrent create/cancel commands, idempotent command fingerprints, duplicate event delivery, stale projection versions, dead-letter routing, API behavior, gateway correlation IDs, and load-balanced route configuration. The smoke tests add real PostgreSQL logical decoding, two Debezium connectors, Kafka, Eureka registration, service failover, all three databases, Flyway, and all HTTP services.
 
 ## Technology baseline
 
@@ -187,6 +198,7 @@ api-gateway/             HTTP entry point and routing
 discovery-server/        Eureka service registry
 frontend/                React customer portal and architecture proof
 order-command-service/  event-sourced aggregate, event store, command API
+inventory-service/      stock consistency and event-sourced reservation lifecycle
 order-query-service/    Kafka projection, read model, query API
 order-activity-function/ serverless Kafka-to-Cosmos activity projection
 debezium/                replication user and connector registration

@@ -149,11 +149,13 @@ jobs:
           fi
           COMMAND_DB_PASSWORD=validation \
           QUERY_DB_PASSWORD=validation \
+          INVENTORY_DB_PASSWORD=validation \
           AWS_REGION=eu-central-1 \
           CLOUDWATCH_LOG_GROUP=/validation/containers \
             docker compose --file compose.yml --file compose.cloud.yml config --quiet
           COMMAND_DB_PASSWORD=validation \
           QUERY_DB_PASSWORD=validation \
+          INVENTORY_DB_PASSWORD=validation \
           PUBLIC_HOST=validation.example.com \
           ACME_EMAIL=validation@example.com \
           ACTIVITY_FUNCTION_HOST=activity.example.com \

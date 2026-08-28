@@ -1,4 +1,4 @@
-export type OrderStatus = 'CREATED' | 'CANCELLED';
+export type OrderStatus = 'CREATED' | 'CONFIRMED' | 'REJECTED' | 'CANCELLED';
 
 export interface OrderItemInput {
   productId: string;
@@ -21,6 +21,7 @@ export interface OrderSummary {
   customerId: string;
   status: OrderStatus;
   totalAmount: number;
+  rejectionReason?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -33,7 +34,7 @@ export interface OrderDetails extends OrderSummary {
 export interface OrderActivityEvent {
   id: string;
   orderId: string;
-  eventType: 'OrderCreated.v1' | 'OrderCancelled.v1';
+  eventType: 'OrderCreated.v1' | 'OrderConfirmed.v1' | 'OrderRejected.v1' | 'OrderCancelled.v1';
   aggregateVersion: number;
   occurredAt: string;
   payload: Record<string, unknown>;

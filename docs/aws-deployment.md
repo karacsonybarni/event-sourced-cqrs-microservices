@@ -1,6 +1,6 @@
 # AWS cloud deployment
 
-This deployment keeps the complete application topology intact while minimizing fixed cloud cost. Terraform provisions an AWS HTTPS entry point, networking, identity, compute, remote state, logs, alarms, and a monthly budget. Docker Compose runs the two PostgreSQL databases, Kafka, Debezium, Eureka, the gateway, and two replicas of each business service on one measured eight-GiB EC2 instance.
+This deployment keeps the complete application topology intact while minimizing fixed cloud cost. Terraform provisions an AWS HTTPS entry point, networking, identity, compute, remote state, logs, alarms, and a monthly budget. Docker Compose runs three PostgreSQL databases, Kafka, Debezium, Eureka, the gateway, two Order command replicas, two query replicas, and one Inventory service on one eight-GiB EC2 instance.
 
 Current public API: [https://n6jxpgtbrc.execute-api.eu-central-1.amazonaws.com/](https://n6jxpgtbrc.execute-api.eu-central-1.amazonaws.com/)
 
@@ -15,6 +15,10 @@ flowchart TB
             Gateway --> Commands[Command service ×2]
             Gateway --> Queries[Query service ×2]
             Commands --> CommandDB[(Command PostgreSQL)]
+            Kafka --> Inventory[Inventory service]
+            Inventory --> InventoryDB[(Inventory PostgreSQL)]
+            InventoryDB --> Debezium
+            Kafka --> Commands
             CommandDB --> Debezium[Debezium Connect]
             Debezium --> Kafka[Kafka KRaft]
             Kafka --> Queries
@@ -30,7 +34,7 @@ flowchart TB
 
 ## Why one deployment host
 
-The live containers use approximately 3.5 GiB before operating-system, build, and Docker overhead. The Free-plan-eligible, eight-GiB `m7i-flex.large` instance is the smallest tested shape with enough headroom for compilation, Kafka, Debezium, two databases, and four replicated Spring services.
+The Inventory database and service have 256 MiB and 512 MiB container limits. The Free-plan-eligible, eight-GiB `m7i-flex.large` is the configured economical shape, but the complete single-host topology must be measured under representative load before treating it as a capacity baseline.
 
 This is a cost-optimized environment, not a claim of infrastructure high availability. It proves the same event sourcing, CDC, consumer idempotency, discovery, and replica behavior as the local topology. A production topology would place stateless services on ECS or EKS, use managed multi-AZ databases and Kafka, and run the registry redundantly or replace it with platform-native discovery.
 
@@ -67,7 +71,7 @@ The command performs the complete bootstrap:
 3. creates the GitHub `cloud` environment and its non-secret deployment variables; and
 4. starts the `Deploy to AWS` workflow.
 
-The workflow checks out the exact tested revision, assumes the deployment role with GitHub OIDC, deploys through Systems Manager without SSH, and runs the complete public command-to-projection smoke test through the HTTPS API Gateway URL.
+The workflow checks out the exact tested revision, assumes the deployment role with GitHub OIDC, deploys through Systems Manager without SSH, and runs the complete public reservation, confirmation, compensation, rejection, and projection smoke test through the HTTPS API Gateway URL.
 
 ## Operations
 

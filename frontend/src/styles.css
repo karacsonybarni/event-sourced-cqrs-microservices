@@ -703,9 +703,28 @@ select:focus {
   color: #087a53;
 }
 
+.status--confirmed {
+  background: #e8effb;
+  color: #285fa7;
+}
+
+.status--rejected {
+  background: #fff0de;
+  color: #a35400;
+}
+
 .status--cancelled {
   background: #f3ecec;
   color: #8f4242;
+}
+
+.rejection-reason {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #8a4700;
 }
 
 .detail-panel {

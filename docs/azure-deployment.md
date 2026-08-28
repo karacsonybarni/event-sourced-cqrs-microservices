@@ -6,7 +6,7 @@ This deployment keeps the complete event-sourced CQRS topology available on Azur
 
 Verified React order portal and API endpoint: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
 
-The deployment runs in Poland Central. Its public event-sourced create, query, and cancel flow, Debezium connector, two command replicas, two query replicas, single-replica failover, HTTPS certificate, management-port isolation, and Terraform state have been verified against the deployed environment.
+The deployment runs in Poland Central. The delivery workflow verifies the public order saga, both Debezium connectors, two command replicas, two query replicas, the Inventory service, single-replica failover, HTTPS certificate, management-port isolation, and Terraform state.
 
 The tested `Standard_B2as_v2` VM has two vCPUs and 8 GiB of memory. It is not one of Azure's 12-month free VM shapes; the Azure Free Account's promotional credit funds it. `scripts/azure/verify-free-plan.sh` blocks provisioning unless the subscription is `Enabled` and its spending limit is `On`, so Azure stops resources instead of charging a payment method when included credit is exhausted. The public service therefore remains available only while promotional credit or another credit-backed allowance remains active.
 
@@ -27,6 +27,10 @@ flowchart TB
         Command --> EventStore[(PostgreSQL event store)]
         EventStore -->|logical replication| Debezium[Debezium Connect]
         Debezium --> Kafka[Apache Kafka]
+        Kafka --> Inventory[Inventory service]
+        Inventory --> InventoryDB[(Inventory PostgreSQL)]
+        InventoryDB -->|logical replication| Debezium
+        Kafka --> Command
         Kafka --> Query
         Query --> QueryDB[(PostgreSQL read model)]
         Kafka -->|private VNet listener| Function[Azure Function]
@@ -41,7 +45,7 @@ flowchart TB
 
 Only ports 80 and 443 are permitted by the network security group. Caddy redirects HTTP to HTTPS, obtains and renews the public certificate, routes `/api` requests directly to the private gateway, and routes browser paths to the React application served by Nginx. A restrictive content security policy keeps the browser application on the same origin. Eureka, Debezium, Kafka, databases, backend replicas, and Actuator management ports remain on the VM's private Docker network or loopback interface. SSH has no inbound rule; Azure Run Command is the normal administration and deployment path.
 
-Two command replicas and two query replicas demonstrate application-level discovery, routing, and failover. The Function uses a dedicated delegated subnet to reach Kafka on the VM's private address; no Kafka port is permitted by the public network security group. A user-assigned managed identity accesses Function storage and Cosmos DB without account keys. Function storage denies traffic by default and exposes its required services through private endpoints and private DNS. The one-VM placement is a cost constraint, not infrastructure high availability: a VM or availability-zone failure stops the synchronous and Kafka paths. A production topology would move the services to a managed orchestrator, PostgreSQL to Flexible Server, and Kafka to a managed Kafka-compatible service across failure domains.
+Two command replicas and two query replicas demonstrate application-level discovery, routing, and failover; Inventory remains one event-driven instance. Its 256 MiB database and 512 MiB service limits reduce the eight-GiB VM's spare headroom, so this topology demonstrates correctness rather than a production capacity target. The Function uses a dedicated delegated subnet to reach Kafka on the VM's private address; no Kafka port is permitted by the public network security group. A user-assigned managed identity accesses Function storage and Cosmos DB without account keys. Function storage denies traffic by default and exposes its required services through private endpoints and private DNS. The one-VM placement is a cost constraint, not infrastructure high availability: a VM or availability-zone failure stops the synchronous and Kafka paths. A production topology would move the services to a managed orchestrator, PostgreSQL to Flexible Server, and Kafka to a managed Kafka-compatible service across failure domains.
 
 ## Provision
 
@@ -109,14 +113,14 @@ az vm run-command invoke \
   --scripts 'cd /opt/event-sourced-cqrs && sudo ./scripts/scaling-test.sh'
 ```
 
-The connector must report one `RUNNING` connector and one `RUNNING` task:
+Both connectors must report one `RUNNING` connector and one `RUNNING` task:
 
 ```bash
 az vm run-command invoke \
   --resource-group "$(terraform -chdir=infra/azure output -raw resource_group_name)" \
   --name "$(terraform -chdir=infra/azure output -raw vm_name)" \
   --command-id RunShellScript \
-  --scripts 'curl --fail --silent http://localhost:8083/connectors/order-events/status'
+  --scripts 'for name in order-events inventory-events; do curl --fail --silent "http://localhost:8083/connectors/${name}/status"; done'
 ```
 
 ## Operations

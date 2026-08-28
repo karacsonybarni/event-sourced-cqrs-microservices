@@ -42,7 +42,7 @@ wait_for_instance_count() {
 create_order() {
   local idempotency_key
   idempotency_key="scale-$(date +%s)-${RANDOM}"
-  local payload='{"customerId":"scale-customer","items":[{"productId":"keyboard","quantity":1,"unitPrice":99.90}]}'
+  local payload='{"customerId":"scale-customer","items":[{"productId":"mechanical-keyboard","quantity":1,"unitPrice":99.90}]}'
   local attempts=30
   local response
   for ((attempt = 1; attempt <= attempts; attempt++)); do
@@ -65,7 +65,7 @@ wait_for_order() {
   local order_id="$1"
   local attempts=30
   for ((attempt = 1; attempt <= attempts; attempt++)); do
-    if curl --fail --silent "${gateway_url}/api/orders/${order_id}" | jq -e '.status == "CREATED"' >/dev/null 2>&1; then
+    if curl --fail --silent "${gateway_url}/api/orders/${order_id}" | jq -e '.status == "CONFIRMED"' >/dev/null 2>&1; then
       return 0
     fi
     sleep 1

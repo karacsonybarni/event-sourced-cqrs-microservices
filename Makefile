@@ -14,7 +14,7 @@ down:
 	docker compose --profile ui down --volumes --remove-orphans
 
 smoke:
-	EXPECTED_COMMAND_INSTANCES=2 EXPECTED_QUERY_INSTANCES=2 ./scripts/smoke-test.sh
+	EXPECTED_COMMAND_INSTANCES=2 EXPECTED_QUERY_INSTANCES=2 EXPECTED_INVENTORY_INSTANCES=1 ./scripts/smoke-test.sh
 
 ui-smoke:
 	./scripts/ui-smoke-test.sh
@@ -26,6 +26,7 @@ scale-smoke:
 cloud-config:
 	COMMAND_DB_PASSWORD=validation \
 	QUERY_DB_PASSWORD=validation \
+	INVENTORY_DB_PASSWORD=validation \
 	AWS_REGION=eu-central-1 \
 	CLOUDWATCH_LOG_GROUP=/validation/containers \
 		docker compose --file compose.yml --file compose.cloud.yml config --quiet
@@ -37,7 +38,7 @@ cloud-destroy:
 	./scripts/aws/destroy-runtime.sh
 
 logs:
-	docker compose --profile ui logs -f frontend discovery-server api-gateway order-command-service order-query-service debezium
+	docker compose --profile ui logs -f frontend discovery-server api-gateway order-command-service inventory-service order-query-service debezium
 
 clean:
 	./mvnw clean

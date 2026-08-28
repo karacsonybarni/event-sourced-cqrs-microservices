@@ -8,8 +8,10 @@ import java.util.UUID;
 
 import com.karacsonybarni.orders.command.domain.OrderLineItem;
 import com.karacsonybarni.orders.command.domain.event.OrderCancelledEvent;
+import com.karacsonybarni.orders.command.domain.event.OrderConfirmedEvent;
 import com.karacsonybarni.orders.command.domain.event.OrderCreatedEvent;
 import com.karacsonybarni.orders.command.domain.event.OrderEvent;
+import com.karacsonybarni.orders.command.domain.event.OrderRejectedEvent;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -49,6 +51,11 @@ public class OrderEventSerializer {
         JsonNode payload = objectMapper.valueToTree(storedEvent.getPayload()).required("payload");
         return switch (storedEvent.getEventType()) {
             case OrderEvent.ORDER_CREATED -> deserializeCreated(payload);
+            case OrderEvent.ORDER_CONFIRMED -> new OrderConfirmedEvent(
+                    Instant.parse(requiredText(payload, "confirmedAt")));
+            case OrderEvent.ORDER_REJECTED -> new OrderRejectedEvent(
+                    requiredText(payload, "reason"),
+                    Instant.parse(requiredText(payload, "rejectedAt")));
             case OrderEvent.ORDER_CANCELLED -> new OrderCancelledEvent(
                     Instant.parse(requiredText(payload, "cancelledAt")));
             default -> throw new IllegalArgumentException("Unsupported order event: " + storedEvent.getEventType());
@@ -58,6 +65,8 @@ public class OrderEventSerializer {
     private ObjectNode serializePayload(OrderEvent event) {
         return switch (event) {
             case OrderCreatedEvent created -> serializeCreated(created);
+            case OrderConfirmedEvent confirmed -> serializeConfirmed(confirmed);
+            case OrderRejectedEvent rejected -> serializeRejected(rejected);
             case OrderCancelledEvent cancelled -> serializeCancelled(cancelled);
         };
     }
@@ -82,6 +91,21 @@ public class OrderEventSerializer {
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("status", "CANCELLED");
         payload.put("cancelledAt", event.cancelledAt().toString());
+        return payload;
+    }
+
+    private ObjectNode serializeConfirmed(OrderConfirmedEvent event) {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("status", "CONFIRMED");
+        payload.put("confirmedAt", event.confirmedAt().toString());
+        return payload;
+    }
+
+    private ObjectNode serializeRejected(OrderRejectedEvent event) {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("status", "REJECTED");
+        payload.put("reason", event.reason());
+        payload.put("rejectedAt", event.rejectedAt().toString());
         return payload;
     }
 

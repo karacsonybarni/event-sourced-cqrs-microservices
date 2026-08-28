@@ -26,6 +26,8 @@ public class OrderProjectionListener {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(OrderProjectionListener.class);
     private static final String ORDER_CREATED = "OrderCreated.v1";
+    private static final String ORDER_CONFIRMED = "OrderConfirmed.v1";
+    private static final String ORDER_REJECTED = "OrderRejected.v1";
     private static final String ORDER_CANCELLED = "OrderCancelled.v1";
 
     private final ObjectMapper objectMapper;
@@ -61,6 +63,8 @@ public class OrderProjectionListener {
 
         switch (eventType) {
             case ORDER_CREATED -> applyCreated(orderId, aggregateVersion, payload);
+            case ORDER_CONFIRMED -> applyConfirmed(orderId, aggregateVersion, payload);
+            case ORDER_REJECTED -> applyRejected(orderId, aggregateVersion, payload);
             case ORDER_CANCELLED -> applyCancelled(orderId, aggregateVersion, payload);
             default -> throw new IllegalArgumentException("Unsupported event type: " + eventType);
         }
@@ -95,6 +99,20 @@ public class OrderProjectionListener {
         order.cancel(cancelled.cancelledAt(), aggregateVersion);
     }
 
+    private void applyConfirmed(UUID orderId, long aggregateVersion, JsonNode payload) throws JacksonException {
+        ConfirmedPayload confirmed = objectMapper.treeToValue(payload, ConfirmedPayload.class);
+        OrderView order = orderViewRepository.findById(orderId)
+                .orElseThrow(() -> new IllegalStateException("Cannot confirm missing order projection " + orderId));
+        order.confirm(confirmed.confirmedAt(), aggregateVersion);
+    }
+
+    private void applyRejected(UUID orderId, long aggregateVersion, JsonNode payload) throws JacksonException {
+        RejectedPayload rejected = objectMapper.treeToValue(payload, RejectedPayload.class);
+        OrderView order = orderViewRepository.findById(orderId)
+                .orElseThrow(() -> new IllegalStateException("Cannot reject missing order projection " + orderId));
+        order.reject(rejected.reason(), rejected.rejectedAt(), aggregateVersion);
+    }
+
     private String requiredText(JsonNode node, String fieldName) {
         return node.required(fieldName).stringValue();
     }
@@ -111,5 +129,11 @@ public class OrderProjectionListener {
     }
 
     record CancelledPayload(String status, Instant cancelledAt) {
+    }
+
+    record ConfirmedPayload(String status, Instant confirmedAt) {
+    }
+
+    record RejectedPayload(String status, String reason, Instant rejectedAt) {
     }
 }

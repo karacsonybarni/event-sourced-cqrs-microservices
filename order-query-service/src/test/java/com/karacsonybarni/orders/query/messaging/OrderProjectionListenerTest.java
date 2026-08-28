@@ -124,4 +124,69 @@ class OrderProjectionListenerTest {
         assertThat(projectedOrder.getAggregateVersion()).isEqualTo(2);
         verify(processedEventRepository).save(any(ProcessedEvent.class));
     }
+
+    @Test
+    void projectsSagaConfirmationAtTheNextAggregateVersion() throws Exception {
+        UUID eventId = UUID.randomUUID();
+        UUID orderId = UUID.randomUUID();
+        OrderView projectedOrder = createdOrder(orderId);
+        when(processedEventRepository.existsById(eventId)).thenReturn(false);
+        when(orderViewRepository.findById(orderId)).thenReturn(Optional.of(projectedOrder));
+        String confirmation = """
+                {
+                  "eventId": "%s",
+                  "eventType": "OrderConfirmed.v1",
+                  "aggregateId": "%s",
+                  "aggregateVersion": 2,
+                  "occurredAt": "2026-01-10T10:16:00Z",
+                  "payload": {"status": "CONFIRMED", "confirmedAt": "2026-01-10T10:16:00Z"}
+                }
+                """.formatted(eventId, orderId);
+
+        listener.project(confirmation);
+
+        assertThat(projectedOrder.getStatus().name()).isEqualTo("CONFIRMED");
+        assertThat(projectedOrder.getAggregateVersion()).isEqualTo(2);
+        verify(processedEventRepository).save(any(ProcessedEvent.class));
+    }
+
+    @Test
+    void projectsSagaRejectionReason() throws Exception {
+        UUID eventId = UUID.randomUUID();
+        UUID orderId = UUID.randomUUID();
+        OrderView projectedOrder = createdOrder(orderId);
+        when(processedEventRepository.existsById(eventId)).thenReturn(false);
+        when(orderViewRepository.findById(orderId)).thenReturn(Optional.of(projectedOrder));
+        String rejection = """
+                {
+                  "eventId": "%s",
+                  "eventType": "OrderRejected.v1",
+                  "aggregateId": "%s",
+                  "aggregateVersion": 2,
+                  "occurredAt": "2026-01-10T10:16:00Z",
+                  "payload": {
+                    "status": "REJECTED",
+                    "reason": "Insufficient stock for keyboard",
+                    "rejectedAt": "2026-01-10T10:16:00Z"
+                  }
+                }
+                """.formatted(eventId, orderId);
+
+        listener.project(rejection);
+
+        assertThat(projectedOrder.getStatus().name()).isEqualTo("REJECTED");
+        assertThat(projectedOrder.getRejectionReason()).isEqualTo("Insufficient stock for keyboard");
+        verify(processedEventRepository).save(any(ProcessedEvent.class));
+    }
+
+    private OrderView createdOrder(UUID orderId) {
+        return new OrderView(
+                orderId,
+                "customer-42",
+                com.karacsonybarni.orders.query.domain.OrderViewStatus.CREATED,
+                new java.math.BigDecimal("99.80"),
+                java.util.List.of(),
+                NOW,
+                1);
+    }
 }

@@ -20,6 +20,12 @@ order-command-service/**
 !order-command-service/target/
 order-command-service/target/**
 !order-command-service/target/order-command-service-*.jar
+!inventory-service/
+inventory-service/**
+!inventory-service/Dockerfile
+!inventory-service/target/
+inventory-service/target/**
+!inventory-service/target/inventory-service-*.jar
 !order-query-service/
 order-query-service/**
 !order-query-service/Dockerfile

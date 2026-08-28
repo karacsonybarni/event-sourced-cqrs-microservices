@@ -8,8 +8,10 @@ import java.util.List;
 import java.util.UUID;
 
 import com.karacsonybarni.orders.command.domain.event.OrderCancelledEvent;
+import com.karacsonybarni.orders.command.domain.event.OrderConfirmedEvent;
 import com.karacsonybarni.orders.command.domain.event.OrderCreatedEvent;
 import com.karacsonybarni.orders.command.domain.event.OrderEvent;
+import com.karacsonybarni.orders.command.domain.event.OrderRejectedEvent;
 import org.junit.jupiter.api.Test;
 
 class OrderTest {
@@ -65,5 +67,57 @@ class OrderTest {
         assertThat(order.getUncommittedEvents())
                 .singleElement()
                 .isInstanceOf(OrderCancelledEvent.class);
+    }
+
+    @Test
+    void inventoryReservationConfirmsANewOrderOnce() {
+        Order order = createdOrder();
+
+        boolean firstConfirmationChangedState = order.confirm(CREATED_AT.plusSeconds(30));
+        boolean repeatedConfirmationChangedState = order.confirm(CREATED_AT.plusSeconds(60));
+
+        assertThat(firstConfirmationChangedState).isTrue();
+        assertThat(repeatedConfirmationChangedState).isFalse();
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
+        assertThat(order.getUncommittedEvents())
+                .singleElement()
+                .isInstanceOf(OrderConfirmedEvent.class);
+    }
+
+    @Test
+    void inventoryRejectionRecordsTheReasonAndPreventsCancellation() {
+        Order order = createdOrder();
+
+        boolean rejected = order.reject("Insufficient stock for keyboard", CREATED_AT.plusSeconds(30));
+        boolean cancelled = order.cancel(CREATED_AT.plusSeconds(60));
+
+        assertThat(rejected).isTrue();
+        assertThat(cancelled).isFalse();
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.REJECTED);
+        assertThat(order.getRejectionReason()).isEqualTo("Insufficient stock for keyboard");
+        assertThat(order.getUncommittedEvents())
+                .singleElement()
+                .isInstanceOf(OrderRejectedEvent.class);
+    }
+
+    @Test
+    void lateInventoryOutcomeDoesNotReviveACancelledOrder() {
+        Order order = createdOrder();
+        order.cancel(CREATED_AT.plusSeconds(30));
+
+        boolean confirmed = order.confirm(CREATED_AT.plusSeconds(60));
+
+        assertThat(confirmed).isFalse();
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(order.getUncommittedEvents())
+                .singleElement()
+                .isInstanceOf(OrderCancelledEvent.class);
+    }
+
+    private Order createdOrder() {
+        var item = new OrderLineItem("keyboard", 1, new BigDecimal("49.90"));
+        return Order.rehydrate(
+                UUID.randomUUID(),
+                List.of(new OrderCreatedEvent("customer-42", new BigDecimal("49.90"), List.of(item), CREATED_AT)));
     }
 }

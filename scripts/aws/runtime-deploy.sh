@@ -9,6 +9,12 @@ if [[ ! -r "${runtime_environment}" ]]; then
   exit 1
 fi
 
+if ! grep --quiet '^INVENTORY_DB_PASSWORD=' "${runtime_environment}"; then
+  inventory_db_password="$(openssl rand -hex 24)"
+  umask 077
+  printf 'INVENTORY_DB_PASSWORD=%s\n' "${inventory_db_password}" >>"${runtime_environment}"
+fi
+
 cd "${repository_root}"
 
 compose=(
@@ -32,10 +38,13 @@ GATEWAY_HEALTH_URL=http://localhost:9080 \
 DISCOVERY_URL=http://localhost:8761 \
 EXPECTED_COMMAND_INSTANCES=2 \
 EXPECTED_QUERY_INSTANCES=2 \
+EXPECTED_INVENTORY_INSTANCES=1 \
   ./scripts/smoke-test.sh
 
-connector_status="$(curl --fail --silent http://localhost:8083/connectors/order-events/status)"
-jq -e '.connector.state == "RUNNING" and .tasks != [] and all(.tasks[]; .state == "RUNNING")' \
-  <<<"${connector_status}" >/dev/null
+for connector_name in order-events inventory-events; do
+  connector_status="$(curl --fail --silent "http://localhost:8083/connectors/${connector_name}/status")"
+  jq -e '.connector.state == "RUNNING" and .tasks != [] and all(.tasks[]; .state == "RUNNING")' \
+    <<<"${connector_status}" >/dev/null
+done
 
 printf 'Cloud runtime deployment and CDC verification completed successfully\n'

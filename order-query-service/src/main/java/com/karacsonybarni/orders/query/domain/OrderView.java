@@ -44,6 +44,9 @@ public class OrderView {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "rejection_reason", length = 300)
+    private String rejectionReason;
+
     @Column(name = "aggregate_version", nullable = false)
     private long aggregateVersion;
 
@@ -69,12 +72,29 @@ public class OrderView {
     }
 
     public void cancel(Instant cancelledAt, long newAggregateVersion) {
+        transitionTo(OrderViewStatus.CANCELLED, cancelledAt, newAggregateVersion, null);
+    }
+
+    public void confirm(Instant confirmedAt, long newAggregateVersion) {
+        transitionTo(OrderViewStatus.CONFIRMED, confirmedAt, newAggregateVersion, null);
+    }
+
+    public void reject(String reason, Instant rejectedAt, long newAggregateVersion) {
+        transitionTo(OrderViewStatus.REJECTED, rejectedAt, newAggregateVersion, reason);
+    }
+
+    private void transitionTo(
+            OrderViewStatus newStatus,
+            Instant transitionedAt,
+            long newAggregateVersion,
+            String newRejectionReason) {
         if (newAggregateVersion <= aggregateVersion) {
             return;
         }
-        status = OrderViewStatus.CANCELLED;
-        updatedAt = cancelledAt;
+        status = newStatus;
+        updatedAt = transitionedAt;
         aggregateVersion = newAggregateVersion;
+        rejectionReason = newRejectionReason;
     }
 
     public UUID getId() {
@@ -103,6 +123,10 @@ public class OrderView {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public String getRejectionReason() {
+        return rejectionReason;
     }
 
     public long getAggregateVersion() {

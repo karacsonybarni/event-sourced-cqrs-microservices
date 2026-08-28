@@ -7,8 +7,10 @@ import java.util.List;
 import java.util.UUID;
 
 import com.karacsonybarni.orders.command.domain.event.OrderCancelledEvent;
+import com.karacsonybarni.orders.command.domain.event.OrderConfirmedEvent;
 import com.karacsonybarni.orders.command.domain.event.OrderCreatedEvent;
 import com.karacsonybarni.orders.command.domain.event.OrderEvent;
+import com.karacsonybarni.orders.command.domain.event.OrderRejectedEvent;
 
 public final class Order {
 
@@ -21,6 +23,7 @@ public final class Order {
     private List<OrderLineItem> items = List.of();
     private Instant createdAt;
     private Instant updatedAt;
+    private String rejectionReason;
     private long version;
 
     private Order(UUID id) {
@@ -50,10 +53,26 @@ public final class Order {
     }
 
     public boolean cancel(Instant now) {
-        if (status == OrderStatus.CANCELLED) {
+        if (status == OrderStatus.CANCELLED || status == OrderStatus.REJECTED) {
             return false;
         }
         record(new OrderCancelledEvent(now));
+        return true;
+    }
+
+    public boolean confirm(Instant now) {
+        if (status != OrderStatus.CREATED) {
+            return false;
+        }
+        record(new OrderConfirmedEvent(now));
+        return true;
+    }
+
+    public boolean reject(String reason, Instant now) {
+        if (status != OrderStatus.CREATED) {
+            return false;
+        }
+        record(new OrderRejectedEvent(reason, now));
         return true;
     }
 
@@ -65,6 +84,8 @@ public final class Order {
     private void apply(OrderEvent event) {
         switch (event) {
             case OrderCreatedEvent created -> applyCreated(created);
+            case OrderConfirmedEvent confirmed -> applyConfirmed(confirmed);
+            case OrderRejectedEvent rejected -> applyRejected(rejected);
             case OrderCancelledEvent cancelled -> applyCancelled(cancelled);
         }
         version++;
@@ -88,6 +109,23 @@ public final class Order {
         }
         status = OrderStatus.CANCELLED;
         updatedAt = event.cancelledAt();
+    }
+
+    private void applyConfirmed(OrderConfirmedEvent event) {
+        if (status != OrderStatus.CREATED) {
+            throw new IllegalStateException("OrderConfirmed requires a newly created order");
+        }
+        status = OrderStatus.CONFIRMED;
+        updatedAt = event.confirmedAt();
+    }
+
+    private void applyRejected(OrderRejectedEvent event) {
+        if (status != OrderStatus.CREATED) {
+            throw new IllegalStateException("OrderRejected requires a newly created order");
+        }
+        status = OrderStatus.REJECTED;
+        rejectionReason = event.reason();
+        updatedAt = event.rejectedAt();
     }
 
     public UUID getId() {
@@ -116,6 +154,10 @@ public final class Order {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public String getRejectionReason() {
+        return rejectionReason;
     }
 
     public long getVersion() {

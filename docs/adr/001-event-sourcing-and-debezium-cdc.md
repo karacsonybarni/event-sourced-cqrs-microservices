@@ -9,7 +9,7 @@ The system needs independently owned command and query models while retaining th
 
 ## Decision
 
-Store each order as an append-only event stream in the command service's PostgreSQL database. Reconstruct the aggregate by replaying `OrderCreated.v1` and `OrderCancelled.v1`. Keep a small stream-metadata row for expected-version checks, locking, and referential integrity; do not store mutable order state there.
+Store each order as an append-only event stream in the command service's PostgreSQL database. Reconstruct the aggregate by replaying `OrderCreated.v1`, `OrderConfirmed.v1`, `OrderRejected.v1`, and `OrderCancelled.v1`. Keep a small stream-metadata row for expected-version checks, locking, and referential integrity; do not store mutable order state there.
 
 Enforce immutability with a database trigger that rejects event updates and deletes. Enforce one event per stream position with a unique `(aggregate_id, aggregate_version)` constraint.
 
@@ -39,8 +39,10 @@ Negative:
 
 ## Alternatives considered
 
-- **Transactional outbox beside mutable aggregate tables:** solves the dual-write problem but duplicates business facts between current state and publication rows, and the aggregate cannot be reconstructed from its authoritative history.
+- **Transactional outbox beside mutable aggregate tables:** solves the dual-write problem and remains appropriate for non-event-sourced aggregates. It is unnecessary for Order because the authoritative event row is already the committed fact to publish.
 - **Publish after database commit:** has an unrecoverable gap between the local commit and broker acknowledgement.
 - **Application polling publisher:** avoids CDC infrastructure but adds polling, claiming, publication-state mutation, and relay code to the command service.
 - **Event sourcing without CDC:** retains history but still needs a safe mechanism to propagate committed events across the service boundary.
 - **Synchronous command-to-query call:** couples availability and still introduces a distributed write problem.
+
+ADR-006 applies the same direct event-store CDC approach selectively to the Inventory reservation lifecycle while retaining transactional current-state stock balances.

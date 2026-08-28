@@ -64,4 +64,20 @@ public class OrderCommandService {
         }
         return CommandResult.accepted(order);
     }
+
+    @Transactional
+    public void confirmInventoryReservation(UUID orderId) {
+        Order order = eventStore.loadForUpdate(orderId);
+        if (order.confirm(clock.instant())) {
+            eventStore.append(order);
+        }
+    }
+
+    @Transactional
+    public void rejectInventoryReservation(UUID orderId, String reason) {
+        Order order = eventStore.loadForUpdate(orderId);
+        if (order.reject(reason, clock.instant())) {
+            eventStore.append(order);
+        }
+    }
 }

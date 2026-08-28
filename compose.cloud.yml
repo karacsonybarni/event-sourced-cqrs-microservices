@@ -34,6 +34,18 @@ services:
         awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
         tag: "{{.Name}}"
 
+  inventory-db:
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: "${INVENTORY_DB_PASSWORD:?Set INVENTORY_DB_PASSWORD}"
+    mem_limit: 256m
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        tag: "{{.Name}}"
+
   kafka:
     ports: !reset []
     mem_limit: 1g
@@ -92,6 +104,19 @@ services:
     environment:
       DATABASE_PASSWORD: "${QUERY_DB_PASSWORD:?Set QUERY_DB_PASSWORD}"
     mem_limit: 640m
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        tag: "{{.Name}}"
+
+  inventory-service:
+    ports: !reset []
+    environment:
+      DATABASE_PASSWORD: "${INVENTORY_DB_PASSWORD:?Set INVENTORY_DB_PASSWORD}"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=70.0 -XX:+UseG1GC"
+    mem_limit: 512m
     logging:
       driver: awslogs
       options:

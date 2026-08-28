@@ -45,14 +45,14 @@ const coreProofSteps: ProofStep[] = [
   },
   {
     id: 'projection',
-    label: 'Read model projected',
-    detail: 'Debezium and Kafka propagate event version 1 to the query side.',
+    label: 'Inventory saga confirmed',
+    detail: 'Inventory reserves the items and OrderConfirmed.v1 reaches the query side.',
     state: 'idle',
   },
   {
     id: 'cancellation',
-    label: 'Cancellation projected',
-    detail: 'OrderCancelled.v1 advances the read model to version 2.',
+    label: 'Compensation requested',
+    detail: 'OrderCancelled.v1 advances the read model and tells inventory to release the reservation.',
     state: 'idle',
   },
   {
@@ -153,7 +153,7 @@ export default function App() {
   const addItem = () => {
     setItems((current) => [
       ...current,
-      { productId: `product-${current.length + 1}`, quantity: 1, unitPrice: 49.9 },
+      { productId: 'monitor', quantity: 1, unitPrice: 249.9 },
     ]);
   };
 
@@ -173,8 +173,8 @@ export default function App() {
     setMessage('Appending the command to the event store…');
     try {
       const result = await createOrder(request, newIdempotencyKey());
-      setMessage(`Command accepted for order ${shortId(result.command.orderId)}. Waiting for projection…`);
-      const projected = await waitForOrder(result.command.orderId, 'CREATED');
+      setMessage(`Command accepted for order ${shortId(result.command.orderId)}. Waiting for inventory…`);
+      const projected = await waitForOrder(result.command.orderId, 'CONFIRMED');
       setSelectedOrder(projected);
       await loadOrders();
       setMessage(`Order ${shortId(projected.orderId)} is visible at event version ${projected.version}.`);
@@ -227,22 +227,22 @@ export default function App() {
       updateProof('conflict', { state: 'success', detail: '409 Conflict · no duplicate event appended' });
 
       updateProof('projection', { state: 'running' });
-      setMessage('Waiting for Debezium, Kafka, and the query projector…');
-      const created = await waitForOrder(first.command.orderId, 'CREATED');
-      if (created.version !== 1) {
-        throw new Error(`Expected projection version 1, received ${created.version}.`);
+      setMessage('Waiting for inventory reservation and order confirmation…');
+      const confirmed = await waitForOrder(first.command.orderId, 'CONFIRMED');
+      if (confirmed.version !== 2) {
+        throw new Error(`Expected projection version 2, received ${confirmed.version}.`);
       }
-      setSelectedOrder(created);
+      setSelectedOrder(confirmed);
       updateProof('projection', {
         state: 'success',
-        detail: `CREATED · event version ${created.version} · ${currency(created.totalAmount)}`,
+        detail: `CONFIRMED · event version ${confirmed.version} · ${currency(confirmed.totalAmount)}`,
       });
 
       updateProof('cancellation', { state: 'running' });
       await cancelOrder(first.command.orderId);
       const cancelled = await waitForOrder(first.command.orderId, 'CANCELLED');
-      if (cancelled.version !== 2) {
-        throw new Error(`Expected projection version 2, received ${cancelled.version}.`);
+      if (cancelled.version !== 3) {
+        throw new Error(`Expected projection version 3, received ${cancelled.version}.`);
       }
       setSelectedOrder(cancelled);
       updateProof('cancellation', {
@@ -265,18 +265,22 @@ export default function App() {
       if (serverlessProjectionEnabled) {
         updateProof('serverless', { state: 'running' });
         setMessage('Waiting for the serverless Kafka-to-Cosmos projection…');
-        const activity = await waitForOrderActivity(cancelled.orderId, 2);
+        const activity = await waitForOrderActivity(cancelled.orderId, 3);
         const eventTypes = activity.map((entry) => entry.eventType);
-        if (!eventTypes.includes('OrderCreated.v1') || !eventTypes.includes('OrderCancelled.v1')) {
-          throw new Error('The Cosmos activity view did not contain both lifecycle events.');
+        if (
+          !eventTypes.includes('OrderCreated.v1')
+          || !eventTypes.includes('OrderConfirmed.v1')
+          || !eventTypes.includes('OrderCancelled.v1')
+        ) {
+          throw new Error('The Cosmos activity view did not contain the complete order lifecycle.');
         }
         updateProof('serverless', {
           state: 'success',
           detail: `${activity.length} immutable documents · Azure Functions + Cosmos DB`,
         });
-        setMessage('All CQRS, event-sourcing, and serverless projection guarantees completed successfully.');
+        setMessage('All saga, CQRS, event-sourcing, and serverless projection guarantees completed successfully.');
       } else {
-        setMessage('All local CQRS and event-sourcing guarantees completed successfully.');
+        setMessage('All local saga, CQRS, and event-sourcing guarantees completed successfully.');
       }
     } catch (caught) {
       const detail = caught instanceof Error ? caught.message : 'Architecture proof failed.';
@@ -355,8 +359,8 @@ export default function App() {
             <span className="eyebrow">Customer order experience</span>
             <h1>One simple portal.<br />Two purpose-built data paths.</h1>
             <p>
-              Place an order through the command model, then watch Debezium and Kafka project
-              the immutable events into a query-optimized customer view.
+              Place an order through the command model, let inventory confirm it through events,
+              then watch the immutable lifecycle reach a query-optimized customer view.
             </p>
             <div className="hero-actions">
               <button className="button button--primary" disabled={busy} onClick={runArchitectureProof}>
@@ -382,11 +386,11 @@ export default function App() {
           </div>
           <ArchitectureArrow />
           <div className="architecture-node">
-            <span>03</span><strong>Event stream</strong><small>Debezium + Kafka</small>
+            <span>03</span><strong>Inventory saga</strong><small>Reserve or reject</small>
           </div>
           <ArchitectureArrow />
           <div className="architecture-node">
-            <span>04</span><strong>Read models</strong><small>PostgreSQL + Cosmos DB</small>
+            <span>04</span><strong>Read models</strong><small>Kafka + projections</small>
           </div>
         </section>
 
@@ -515,6 +519,8 @@ export default function App() {
                   >
                     <option value="">All statuses</option>
                     <option value="CREATED">Created</option>
+                    <option value="CONFIRMED">Confirmed</option>
+                    <option value="REJECTED">Rejected</option>
                     <option value="CANCELLED">Cancelled</option>
                   </select>
                 </label>
@@ -567,7 +573,10 @@ export default function App() {
                 </div>
               ))}
             </div>
-            {selectedOrder.status === 'CREATED' && (
+            {selectedOrder.rejectionReason && (
+              <p className="rejection-reason">Inventory rejected this order: {selectedOrder.rejectionReason}</p>
+            )}
+            {(selectedOrder.status === 'CREATED' || selectedOrder.status === 'CONFIRMED') && (
               <button
                 className="button button--danger"
                 disabled={busy}

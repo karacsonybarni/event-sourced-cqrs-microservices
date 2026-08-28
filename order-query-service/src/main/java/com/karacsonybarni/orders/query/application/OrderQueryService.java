@@ -48,6 +48,7 @@ public class OrderQueryService {
             String customerId,
             OrderViewStatus status,
             BigDecimal totalAmount,
+            String rejectionReason,
             Instant createdAt,
             Instant updatedAt) {
 
@@ -57,6 +58,7 @@ public class OrderQueryService {
                     view.getCustomerId(),
                     view.getStatus(),
                     view.getTotalAmount(),
+                    view.getRejectionReason(),
                     view.getCreatedAt(),
                     view.getUpdatedAt());
         }
@@ -68,6 +70,7 @@ public class OrderQueryService {
             OrderViewStatus status,
             BigDecimal totalAmount,
             List<Item> items,
+            String rejectionReason,
             Instant createdAt,
             Instant updatedAt,
             long version) {
@@ -80,6 +83,7 @@ public class OrderQueryService {
                     view.getStatus(),
                     view.getTotalAmount(),
                     items,
+                    view.getRejectionReason(),
                     view.getCreatedAt(),
                     view.getUpdatedAt(),
                     view.getAggregateVersion());

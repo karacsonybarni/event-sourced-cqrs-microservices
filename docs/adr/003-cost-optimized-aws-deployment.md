@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-The complete platform needs Kafka, Debezium Connect, two PostgreSQL databases, a registry, a gateway, and replicated command and query services. Permanently managed equivalents would create significant fixed cost, while reducing the topology to one application or replacing Kafka would stop demonstrating the implemented consistency and delivery contracts.
+The complete platform needs Kafka, Debezium Connect, three PostgreSQL databases, a registry, a gateway, replicated command and query services, and the event-driven Inventory service. Permanently managed equivalents would create significant fixed cost, while reducing the topology to one application or replacing Kafka would stop demonstrating the implemented consistency and delivery contracts.
 
 The deployment must remain reproducible, externally reachable over HTTPS, observable, inexpensive to remove, and free of long-lived cloud credentials in CI.
 
@@ -20,7 +20,8 @@ Generate database passwords on the instance during first bootstrap. They remain 
 
 ## Consequences
 
-- The full event-sourced CQRS and Debezium path runs without changing application semantics.
+- The full event-sourced CQRS, saga, and Debezium paths run without changing application semantics.
+- Inventory reduces the eight-GiB host's previous spare headroom; its resource limits preserve the economical shape, but representative load must be remeasured before this becomes a capacity baseline.
 - Provisioning, identity, networking, delivery, verification, logging, and teardown are reproducible and reviewable.
 - The public client receives an AWS-managed HTTPS URL without purchasing a domain or load balancer.
 - Free operation depends on account-specific AWS Free plan credits; this is not an always-free topology, and paid accounts can incur standard usage charges.

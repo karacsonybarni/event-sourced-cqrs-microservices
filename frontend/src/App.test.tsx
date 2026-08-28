@@ -26,7 +26,8 @@ const createdOrder = {
   updatedAt: createdAt,
   version: 1,
 };
-const cancelledOrder = { ...createdOrder, status: 'CANCELLED', version: 2 };
+const confirmedOrder = { ...createdOrder, status: 'CONFIRMED', version: 2 };
+const cancelledOrder = { ...confirmedOrder, status: 'CANCELLED', version: 3 };
 
 describe('App', () => {
   afterEach(() => {
@@ -43,7 +44,7 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'Create order' })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Order history' })).toBeVisible();
     expect(screen.getByText('Idempotent replay')).toBeVisible();
-    expect(screen.getByText('Read model projected')).toBeVisible();
+    expect(screen.getByText('Inventory saga confirmed')).toBeVisible();
   });
 
   it('executes the complete event-sourced CQRS proof through the public API contract', async () => {
@@ -54,7 +55,7 @@ describe('App', () => {
       .mockResolvedValueOnce(
         jsonResponse({ status: 409, detail: 'Idempotency key belongs to a different create command' }, 409),
       )
-      .mockResolvedValueOnce(jsonResponse(createdOrder))
+      .mockResolvedValueOnce(jsonResponse(confirmedOrder))
       .mockResolvedValueOnce(jsonResponse({ orderId, status: 'CANCELLED' }, 202))
       .mockResolvedValueOnce(jsonResponse(cancelledOrder))
       .mockResolvedValueOnce(
@@ -66,7 +67,8 @@ describe('App', () => {
       .mockResolvedValueOnce(
         jsonResponse([
           { id: 'event-1', orderId, eventType: 'OrderCreated.v1', aggregateVersion: 1 },
-          { id: 'event-2', orderId, eventType: 'OrderCancelled.v1', aggregateVersion: 2 },
+          { id: 'event-2', orderId, eventType: 'OrderConfirmed.v1', aggregateVersion: 2 },
+          { id: 'event-3', orderId, eventType: 'OrderCancelled.v1', aggregateVersion: 3 },
         ]),
       );
     vi.stubGlobal('fetch', fetchMock);
@@ -76,11 +78,11 @@ describe('App', () => {
 
     expect(
       await screen.findByText(
-        'All CQRS, event-sourcing, and serverless projection guarantees completed successfully.',
+        'All saga, CQRS, event-sourcing, and serverless projection guarantees completed successfully.',
       ),
     ).toBeVisible();
     await waitFor(() => expect(screen.getAllByText('Passed')).toHaveLength(7));
-    expect(screen.getByText('v2')).toBeVisible();
+    expect(screen.getByText('v3')).toBeVisible();
     expect(screen.getAllByText('CANCELLED').length).toBeGreaterThan(0);
 
     expect(fetchMock).toHaveBeenCalledTimes(8);

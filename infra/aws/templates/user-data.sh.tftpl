@@ -34,13 +34,20 @@ install --directory --mode 0700 /etc/event-sourced-cqrs
 if [[ ! -f /etc/event-sourced-cqrs/runtime.env ]]; then
   command_db_password="$(openssl rand -hex 24)"
   query_db_password="$(openssl rand -hex 24)"
+  inventory_db_password="$(openssl rand -hex 24)"
   umask 077
   cat > /etc/event-sourced-cqrs/runtime.env <<EOF
 AWS_REGION=${aws_region}
 CLOUDWATCH_LOG_GROUP=${container_log_group_name}
 COMMAND_DB_PASSWORD=$${command_db_password}
 QUERY_DB_PASSWORD=$${query_db_password}
+INVENTORY_DB_PASSWORD=$${inventory_db_password}
 EOF
+fi
+
+if ! grep --quiet '^INVENTORY_DB_PASSWORD=' /etc/event-sourced-cqrs/runtime.env; then
+  inventory_db_password="$(openssl rand -hex 24)"
+  printf 'INVENTORY_DB_PASSWORD=%s\n' "$${inventory_db_password}" >> /etc/event-sourced-cqrs/runtime.env
 fi
 
 cat > /usr/local/bin/deploy-event-sourced-cqrs <<'SCRIPT'

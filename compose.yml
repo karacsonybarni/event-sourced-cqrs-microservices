@@ -59,6 +59,31 @@ services:
       timeout: 3s
       retries: 20
 
+  inventory-db:
+    image: postgres:18-alpine
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=4
+      - -c
+      - max_wal_senders=4
+    environment:
+      POSTGRES_DB: inventory
+      POSTGRES_USER: inventory
+      POSTGRES_PASSWORD: inventory
+    ports:
+      - "5435:5432"
+    volumes:
+      - inventory-db-data:/var/lib/postgresql
+      - ./debezium/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory -d inventory"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
   kafka:
     image: apache/kafka:4.3.1
     environment:
@@ -102,6 +127,27 @@ services:
           --bootstrap-server kafka:9092 \
           --create \
           --if-not-exists \
+          --topic orders.events.v1.inventory.DLT \
+          --partitions 3 \
+          --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka:9092 \
+          --create \
+          --if-not-exists \
+          --topic inventory.events.v1 \
+          --partitions 3 \
+          --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka:9092 \
+          --create \
+          --if-not-exists \
+          --topic inventory.events.v1.orders.DLT \
+          --partitions 3 \
+          --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka:9092 \
+          --create \
+          --if-not-exists \
           --topic orders.events.v1.DLT \
           --partitions 3 \
           --replication-factor 1
@@ -133,6 +179,8 @@ services:
     depends_on:
       command-db:
         condition: service_healthy
+      inventory-db:
+        condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
     healthcheck:
@@ -147,12 +195,15 @@ services:
     user: root
     volumes:
       - ./debezium/order-events-connector.json:/config/order-events-connector.json:ro
+      - ./debezium/inventory-events-connector.json:/config/inventory-events-connector.json:ro
       - ./debezium/register-connector.sh:/config/register-connector.sh:ro
     entrypoint: ["/bin/sh", "/config/register-connector.sh"]
     depends_on:
       debezium:
         condition: service_healthy
       order-command-service:
+        condition: service_healthy
+      inventory-service:
         condition: service_healthy
 
   order-command-service:
@@ -166,6 +217,7 @@ services:
       EUREKA_URL: http://discovery-server:8761/eureka/
       EUREKA_LEASE_RENEWAL_INTERVAL_SECONDS: 5
       EUREKA_LEASE_EXPIRATION_SECONDS: 15
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     ports:
       - "8081"
     depends_on:
@@ -173,8 +225,38 @@ services:
         condition: service_healthy
       discovery-server:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  inventory-service:
+    build:
+      context: .
+      dockerfile: inventory-service/Dockerfile
+    environment:
+      DATABASE_URL: jdbc:postgresql://inventory-db:5432/inventory
+      DATABASE_USERNAME: inventory
+      DATABASE_PASSWORD: inventory
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      EUREKA_URL: http://discovery-server:8761/eureka/
+      EUREKA_LEASE_RENEWAL_INTERVAL_SECONDS: 5
+      EUREKA_LEASE_EXPIRATION_SECONDS: 15
+    ports:
+      - "8084"
+    depends_on:
+      inventory-db:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      discovery-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8084/actuator/health/readiness | grep -q UP"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -252,3 +334,4 @@ services:
 volumes:
   command-db-data:
   query-db-data:
+  inventory-db-data:
