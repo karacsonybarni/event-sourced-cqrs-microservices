@@ -304,11 +304,19 @@ jobs:
           echo "=== Latest activity DLT records ==="
           dlt_offsets="$(docker exec cqrs-orders-kafka-1 /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic orders.events.v1.activity.DLT 2>/dev/null || true)"
           printf "%s\n" "${dlt_offsets}"
+          printf "%s\n" "${dlt_offsets}" |
           while IFS=: read -r topic partition end_offset; do
-            [[ -n "${topic}" && -n "${partition}" && "${end_offset}" =~ ^[0-9]+$ ]] || continue
-            start_offset=$((end_offset > 10 ? end_offset - 10 : 0))
+            [ -n "${topic}" ] && [ -n "${partition}" ] || continue
+            case "${end_offset}" in
+              ''|*[!0-9]*) continue ;;
+            esac
+            if [ "${end_offset}" -gt 10 ]; then
+              start_offset=$((end_offset - 10))
+            else
+              start_offset=0
+            fi
             message_count=$((end_offset - start_offset))
-            ((message_count > 0)) || continue
+            [ "${message_count}" -gt 0 ] || continue
             echo "--- ${topic} partition ${partition}, offsets ${start_offset}..$((end_offset - 1)) ---"
             timeout 10 docker exec cqrs-orders-kafka-1 /opt/kafka/bin/kafka-console-consumer.sh \
               --bootstrap-server localhost:9092 \
@@ -316,7 +324,7 @@ jobs:
               --partition "${partition}" \
               --offset "${start_offset}" \
               --max-messages "${message_count}" || true
-          done <<<"${dlt_offsets}"
+          done
           REMOTE_SCRIPT
           )"
           az vm run-command invoke \

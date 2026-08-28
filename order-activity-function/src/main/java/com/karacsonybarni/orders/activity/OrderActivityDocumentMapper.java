@@ -19,7 +19,7 @@ final class OrderActivityDocumentMapper {
     }
 
     Map<String, Object> map(String serializedEvent) throws JacksonException {
-        JsonNode envelope = objectMapper.readTree(serializedEvent);
+        JsonNode envelope = unwrapKafkaEvent(serializedEvent);
         String eventId = requiredText(envelope, "eventId");
         String orderId = requiredText(envelope, "aggregateId");
         String occurredAt = requiredText(envelope, "occurredAt");
@@ -53,6 +53,25 @@ final class OrderActivityDocumentMapper {
         document.put("occurredAt", occurredAt);
         document.put("payload", objectMapper.treeToValue(payload, Object.class));
         return document;
+    }
+
+    private JsonNode unwrapKafkaEvent(String serializedEvent) throws JacksonException {
+        JsonNode kafkaEvent = objectMapper.readTree(serializedEvent);
+        JsonNode value = kafkaEvent.get("Value");
+        if (value == null) {
+            return kafkaEvent;
+        }
+        if (value.isObject()) {
+            return value;
+        }
+        if (!value.isString()) {
+            throw new IllegalArgumentException("Kafka event Value must contain a JSON string or object");
+        }
+        String serializedValue = value.asString();
+        if (serializedValue.isBlank()) {
+            throw new IllegalArgumentException("Kafka event Value must not be blank");
+        }
+        return objectMapper.readTree(serializedValue);
     }
 
     private String requiredText(JsonNode node, String fieldName) {
