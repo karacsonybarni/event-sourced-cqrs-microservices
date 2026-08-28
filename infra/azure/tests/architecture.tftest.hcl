@@ -24,7 +24,6 @@ mock_provider "azurerm" {
     }
   }
 
-
   override_resource {
     target          = azurerm_subnet.private_endpoints
     override_during = plan
@@ -78,6 +77,15 @@ run "cost_controlled_cloud_topology" {
   assert {
     condition     = azurerm_network_security_rule.http.destination_port_range == "80" && azurerm_network_security_rule.https.destination_port_range == "443"
     error_message = "Only the Caddy HTTP and HTTPS entry points may be publicly exposed."
+  }
+
+  assert {
+    condition = (
+      azurerm_network_security_rule.function_kafka.source_address_prefix == azurerm_subnet.functions.address_prefixes[0] &&
+      azurerm_network_security_rule.function_kafka.destination_address_prefix == "10.42.1.4" &&
+      azurerm_network_security_rule.function_kafka.destination_port_range == "9094"
+    )
+    error_message = "The Function subnet must reach only the VM Kafka VNET listener on 10.42.1.4:9094."
   }
 
   assert {
@@ -144,7 +152,6 @@ run "cost_controlled_cloud_topology" {
     condition     = azurerm_storage_account.activity_function.network_rules[0].default_action == "Deny"
     error_message = "Function storage must deny traffic outside its explicit network boundary."
   }
-
 
   assert {
     condition     = length(azurerm_private_endpoint.activity_storage) == 3

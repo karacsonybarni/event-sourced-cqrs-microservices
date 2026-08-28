@@ -28,21 +28,45 @@ jobs:
     env:
       DEPLOY_REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
+      - name: Ignore superseded automatic deployments
+        id: freshness
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "deploy=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          main_sha="$(gh api \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" \
+            --jq '.object.sha')"
+          if [[ "${DEPLOY_REVISION}" == "${main_sha}" ]]; then
+            echo "deploy=true" >> "${GITHUB_OUTPUT}"
+          else
+            printf 'Skipping superseded Azure deployment for %s; main is %s.\n' "${DEPLOY_REVISION}" "${main_sha}"
+            echo "deploy=false" >> "${GITHUB_OUTPUT}"
+          fi
       - uses: actions/checkout@v6
+        if: steps.freshness.outputs.deploy == 'true'
         with:
           ref: ${{ env.DEPLOY_REVISION }}
       - name: Configure short-lived Azure credentials
+        if: steps.freshness.outputs.deploy == 'true'
         uses: azure/login@v3.0.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       - uses: actions/setup-java@v5
+        if: steps.freshness.outputs.deploy == 'true'
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
       - name: Package and deploy the serverless activity projection
+        if: steps.freshness.outputs.deploy == 'true'
         env:
           CONFIGURED_FUNCTION_APP_NAME: ${{ vars.AZURE_FUNCTION_APP_NAME }}
           RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
@@ -85,29 +109,29 @@ jobs:
             sleep 10
           done
 
-          legacy_storage_settings="$(az functionapp config appsettings list \
+          legacy_runtime_settings="$(az functionapp config appsettings list \
             --resource-group "${RESOURCE_GROUP}" \
             --name "${function_app_name}" \
-            --query "[?name=='AzureWebJobsStorage' || name=='DEPLOYMENT_STORAGE_CONNECTION_STRING'].name" \
+            --query "[?name=='AzureWebJobsStorage' || name=='DEPLOYMENT_STORAGE_CONNECTION_STRING' || name=='CosmosConnection__credential'].name" \
             --output tsv)"
-          if [[ -n "${legacy_storage_settings}" ]]; then
-            printf 'Removing conflicting legacy Function storage settings:\n%s\n' "${legacy_storage_settings}"
-            mapfile -t legacy_storage_setting_names <<<"${legacy_storage_settings}"
+          if [[ -n "${legacy_runtime_settings}" ]]; then
+            printf 'Removing conflicting legacy Function settings:\n%s\n' "${legacy_runtime_settings}"
+            mapfile -t legacy_runtime_setting_names <<<"${legacy_runtime_settings}"
             az functionapp config appsettings delete \
               --resource-group "${RESOURCE_GROUP}" \
               --name "${function_app_name}" \
-              --setting-names "${legacy_storage_setting_names[@]}" \
+              --setting-names "${legacy_runtime_setting_names[@]}" \
               --output none
           fi
 
-          remaining_legacy_storage_settings="$(az functionapp config appsettings list \
+          remaining_legacy_runtime_settings="$(az functionapp config appsettings list \
             --resource-group "${RESOURCE_GROUP}" \
             --name "${function_app_name}" \
-            --query "[?name=='AzureWebJobsStorage' || name=='DEPLOYMENT_STORAGE_CONNECTION_STRING'].name" \
+            --query "[?name=='AzureWebJobsStorage' || name=='DEPLOYMENT_STORAGE_CONNECTION_STRING' || name=='CosmosConnection__credential'].name" \
             --output tsv)"
-          if [[ -n "${remaining_legacy_storage_settings}" ]]; then
-            echo "Conflicting legacy Function storage settings remain after cleanup." >&2
-            printf '%s\n' "${remaining_legacy_storage_settings}" >&2
+          if [[ -n "${remaining_legacy_runtime_settings}" ]]; then
+            echo "Conflicting legacy Function settings remain after cleanup." >&2
+            printf '%s\n' "${remaining_legacy_runtime_settings}" >&2
             exit 1
           fi
 
@@ -130,16 +154,15 @@ jobs:
               "COSMOS_DATABASE_NAME=orders-activity" \
               "COSMOS_CONTAINER_NAME=events" \
               "CosmosConnection__accountEndpoint=https://${function_app_name}.documents.azure.com:443/" \
-              "CosmosConnection__credential=managedidentity" \
               "CosmosConnection__clientId=${function_identity_client_id}" \
             --output none
 
           configured_runtime_settings="$(az functionapp config appsettings list \
             --resource-group "${RESOURCE_GROUP}" \
             --name "${function_app_name}" \
-            --query "[?name=='KAFKA_BROKERS' || name=='COSMOS_DATABASE_NAME' || name=='COSMOS_CONTAINER_NAME' || name=='CosmosConnection__accountEndpoint' || name=='CosmosConnection__credential' || name=='CosmosConnection__clientId'].name" \
+            --query "[?name=='KAFKA_BROKERS' || name=='COSMOS_DATABASE_NAME' || name=='COSMOS_CONTAINER_NAME' || name=='CosmosConnection__accountEndpoint' || name=='CosmosConnection__clientId'].name" \
             --output tsv)"
-          if [[ "$(wc -w <<<"${configured_runtime_settings}")" -ne 6 ]]; then
+          if [[ "$(wc -w <<<"${configured_runtime_settings}")" -ne 5 ]]; then
             echo "Azure Function runtime settings did not reconcile completely." >&2
             printf '%s\n' "${configured_runtime_settings}" >&2
             exit 1
@@ -191,76 +214,8 @@ jobs:
           jq -e '
             any(.[]; .name == "function:projectOrderActivity" and .instanceCount == 1)
           ' <<<"${always_ready}" >/dev/null
-
-          function_host="$(az resource show \
-            --resource-group "${RESOURCE_GROUP}" \
-            --resource-type "Microsoft.Web/sites" \
-            --name "${function_app_name}" \
-            --query properties.defaultHostName \
-            --output tsv)"
-          if [[ -z "${function_host}" ]]; then
-            echo "Unable to resolve the deployed Function host for the Cosmos write probe." >&2
-            exit 1
-          fi
-
-          function_keys_url="https://management.azure.com${function_app_resource_id}/functions/probeOrderActivityStore/listkeys?api-version=2025-03-01"
-          host_keys_url="https://management.azure.com${function_app_resource_id}/host/default/listkeys?api-version=2025-03-01"
-          function_key=""
-          for attempt in {1..12}; do
-            function_key="$(az rest \
-              --method post \
-              --url "${function_keys_url}" \
-              --query 'properties.default' \
-              --output tsv 2>/dev/null || true)"
-            if [[ -z "${function_key}" ]]; then
-              function_key="$(az rest \
-                --method post \
-                --url "${host_keys_url}" \
-                --query 'functionKeys.default' \
-                --output tsv 2>/dev/null || true)"
-            fi
-            if [[ -z "${function_key}" ]]; then
-              function_key="$(az rest \
-                --method post \
-                --url "${host_keys_url}" \
-                --query masterKey \
-                --output tsv 2>/dev/null || true)"
-            fi
-            if [[ -n "${function_key}" ]]; then
-              break
-            fi
-            printf 'Waiting for protected Function probe key (%d/12)\n' "${attempt}" >&2
-            sleep 10
-          done
-          if [[ -z "${function_key}" ]]; then
-            echo "Unable to resolve a protected Function key for the Cosmos write probe after retries." >&2
-            exit 1
-          fi
-          echo "::add-mask::${function_key}"
-
-          probe_order_id="00000000-0000-0000-0000-000000000001"
-          probe_body_file="$(mktemp)"
-          probe_status=""
-          for attempt in {1..12}; do
-            probe_status="$(curl --silent --show-error \
-              --output "${probe_body_file}" \
-              --write-out '%{http_code}' \
-              --request POST \
-              --header "x-functions-key: ${function_key}" \
-              "https://${function_host}/api/activity-probe/${probe_order_id}" || true)"
-            if [[ "${probe_status}" == "200" ]]; then
-              break
-            fi
-            printf 'Waiting for Cosmos write probe (%d/12), HTTP %s\n' "${attempt}" "${probe_status}" >&2
-            sleep 10
-          done
-          printf 'Cosmos write probe HTTP %s: ' "${probe_status}"
-          cat "${probe_body_file}"
-          printf '\n'
-          if [[ "${probe_status}" != "200" ]]; then
-            exit 1
-          fi
       - name: Deploy through Azure Run Command
+        if: steps.freshness.outputs.deploy == 'true'
         env:
           RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
           VM_NAME: ${{ vars.AZURE_VM_NAME }}
@@ -275,15 +230,18 @@ jobs:
           printf '%s\n' "${deployment_output}"
           grep --quiet '^AZURE_DEPLOYMENT_SUCCEEDED$' <<<"${deployment_output}"
       - name: Verify the public event-sourced CQRS flow
+        if: steps.freshness.outputs.deploy == 'true'
         env:
           GATEWAY_URL: ${{ vars.PUBLIC_API_URL }}
           VERIFY_PLATFORM: "false"
         run: ./scripts/smoke-test.sh
       - name: Verify the public React order portal
+        if: steps.freshness.outputs.deploy == 'true'
         env:
           UI_URL: ${{ vars.PUBLIC_API_URL }}
         run: ./scripts/ui-smoke-test.sh
       - name: Verify the public serverless NoSQL projection
+        if: steps.freshness.outputs.deploy == 'true'
         env:
           GATEWAY_URL: ${{ vars.PUBLIC_API_URL }}
           RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}

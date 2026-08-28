@@ -182,7 +182,6 @@ resource "azurerm_function_app_flex_consumption" "activity" {
     "COSMOS_DATABASE_NAME"              = azurerm_cosmosdb_sql_database.activity.name
     "COSMOS_CONTAINER_NAME"             = azurerm_cosmosdb_sql_container.activity.name
     "CosmosConnection__accountEndpoint" = azurerm_cosmosdb_account.activity.endpoint
-    "CosmosConnection__credential"      = "managedidentity"
     "CosmosConnection__clientId"        = azurerm_user_assigned_identity.activity_function.client_id
   }
 
