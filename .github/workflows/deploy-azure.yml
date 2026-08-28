@@ -154,27 +154,42 @@ jobs:
             --name "${function_app_name}" \
             --src order-activity-function.zip
 
-          # Terraform changes are not applied by this workflow. Keep the Kafka
-          # trigger alive explicitly so private Kafka does not depend on the
-          # external Flex scale controller being able to reach the VM broker.
-          az functionapp scale config always-ready set \
+          # The high-level scale CLI reads the App Service plan, while the deploy
+          # identity is intentionally scoped to the Function App. Patch the Flex
+          # functionAppConfig directly so no broader plan permission is required.
+          function_app_resource_id="$(az resource show \
             --resource-group "${RESOURCE_GROUP}" \
+            --resource-type "Microsoft.Web/sites" \
             --name "${function_app_name}" \
-            --settings "function:projectOrderActivity=1" \
+            --query id \
+            --output tsv)"
+          function_app_arm_url="https://management.azure.com${function_app_resource_id}?api-version=2025-03-01"
+          function_app_config="$(az rest \
+            --method get \
+            --url "${function_app_arm_url}" \
+            --query properties.functionAppConfig \
+            --output json)"
+          patched_function_app_config="$(jq \
+            '.scaleAndConcurrency.alwaysReady = [{"name":"function:projectOrderActivity","instanceCount":1}]' \
+            <<<"${function_app_config}")"
+          function_app_patch="$(jq -cn \
+            --argjson functionAppConfig "${patched_function_app_config}" \
+            '{properties:{functionAppConfig:$functionAppConfig}}')"
+          az rest \
+            --method patch \
+            --url "${function_app_arm_url}" \
+            --headers 'Content-Type=application/json' \
+            --body "${function_app_patch}" \
             --output none
 
-          always_ready="$(az functionapp scale config show \
-            --resource-group "${RESOURCE_GROUP}" \
-            --name "${function_app_name}" \
-            --query alwaysReady \
+          always_ready="$(az rest \
+            --method get \
+            --url "${function_app_arm_url}" \
+            --query properties.functionAppConfig.scaleAndConcurrency.alwaysReady \
             --output json)"
           printf 'Azure Function always-ready configuration: %s\n' "${always_ready}"
           jq -e '
-            if type == "array" then
-              any(.[]; ((.name // .target) == "function:projectOrderActivity") and .instanceCount == 1)
-            else
-              ((.name // .target) == "function:projectOrderActivity") and .instanceCount == 1
-            end
+            any(.[]; .name == "function:projectOrderActivity" and .instanceCount == 1)
           ' <<<"${always_ready}" >/dev/null
       - name: Deploy through Azure Run Command
         env:
