@@ -1,5 +1,7 @@
 package com.karacsonybarni.orders.activity;
 
+import java.util.Map;
+
 import com.microsoft.azure.functions.BrokerProtocol;
 import com.microsoft.azure.functions.ExecutionContext;
 import com.microsoft.azure.functions.OutputBinding;
@@ -45,12 +47,18 @@ public class OrderActivityFunction {
                     dataType = "string",
                     enableIdempotence = true) OutputBinding<String> deadLetterOutput,
             ExecutionContext context) {
+        Map<String, Object> document;
         try {
-            activityStore.upsert(documentMapper.map(serializedEvent));
-            context.getLogger().info("Projected an order event into the activity document model");
+            document = documentMapper.map(serializedEvent);
         } catch (IllegalArgumentException | JacksonException exception) {
             deadLetterOutput.setValue(serializedEvent);
-            context.getLogger().warning("Routed an invalid order event to the activity dead-letter topic");
+            context.getLogger().warning(
+                    "Routed an invalid order event to the activity dead-letter topic: "
+                            + exception.getMessage());
+            return;
         }
+
+        activityStore.upsert(document);
+        context.getLogger().info("Projected an order event into the activity document model");
     }
 }
