@@ -191,6 +191,52 @@ jobs:
           jq -e '
             any(.[]; .name == "function:projectOrderActivity" and .instanceCount == 1)
           ' <<<"${always_ready}" >/dev/null
+
+          function_host="$(az functionapp show \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${function_app_name}" \
+            --query defaultHostName \
+            --output tsv)"
+          function_key="$(az functionapp keys list \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${function_app_name}" \
+            --query 'functionKeys.default' \
+            --output tsv)"
+          if [[ -z "${function_key}" ]]; then
+            function_key="$(az functionapp keys list \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${function_app_name}" \
+              --query masterKey \
+              --output tsv)"
+          fi
+          if [[ -z "${function_host}" || -z "${function_key}" ]]; then
+            echo "Unable to resolve the deployed Function host or function key for the Cosmos write probe." >&2
+            exit 1
+          fi
+          echo "::add-mask::${function_key}"
+
+          probe_order_id="00000000-0000-0000-0000-000000000001"
+          probe_body_file="$(mktemp)"
+          probe_status=""
+          for attempt in {1..12}; do
+            probe_status="$(curl --silent --show-error \
+              --output "${probe_body_file}" \
+              --write-out '%{http_code}' \
+              --request POST \
+              --header "x-functions-key: ${function_key}" \
+              "https://${function_host}/api/activity-probe/${probe_order_id}" || true)"
+            if [[ "${probe_status}" == "200" ]]; then
+              break
+            fi
+            printf 'Waiting for Cosmos write probe (%d/12), HTTP %s\n' "${attempt}" "${probe_status}" >&2
+            sleep 10
+          done
+          printf 'Cosmos write probe HTTP %s: ' "${probe_status}"
+          cat "${probe_body_file}"
+          printf '\n'
+          if [[ "${probe_status}" != "200" ]]; then
+            exit 1
+          fi
       - name: Deploy through Azure Run Command
         env:
           RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
@@ -236,8 +282,22 @@ jobs:
               docker exec cqrs-orders-kafka-1 /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --group order-activity-function-v1 --describe || true
               echo "=== Orders topic offsets ==="
               docker exec cqrs-orders-kafka-1 /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic orders.events.v1 || true
-              echo "=== Activity DLT ==="
-              timeout 10 docker exec cqrs-orders-kafka-1 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic orders.events.v1.activity.DLT --from-beginning --max-messages 10 || true
+              echo "=== Latest activity DLT records ==="
+              dlt_offsets="$(docker exec cqrs-orders-kafka-1 /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic orders.events.v1.activity.DLT 2>/dev/null || true)"
+              printf "%s\n" "${dlt_offsets}"
+              while IFS=: read -r topic partition end_offset; do
+                [[ -n "${topic}" && -n "${partition}" && "${end_offset}" =~ ^[0-9]+$ ]] || continue
+                start_offset=$((end_offset > 10 ? end_offset - 10 : 0))
+                message_count=$((end_offset - start_offset))
+                ((message_count > 0)) || continue
+                echo "--- ${topic} partition ${partition}, offsets ${start_offset}..$((end_offset - 1)) ---"
+                timeout 10 docker exec cqrs-orders-kafka-1 /opt/kafka/bin/kafka-console-consumer.sh \
+                  --bootstrap-server localhost:9092 \
+                  --topic "${topic}" \
+                  --partition "${partition}" \
+                  --offset "${start_offset}" \
+                  --max-messages "${message_count}" || true
+              done <<<"${dlt_offsets}"
             ' \
             --query 'value[].message' \
             --output tsv || true
