@@ -130,7 +130,6 @@ gh api \
   --silent
 gh variable set AWS_DEPLOY_ENABLED --repo "${github_repository}" --body "false"
 gh variable set AZURE_CLIENT_ID --repo "${github_repository}" --body "${azure_client_id}"
-gh variable set AZURE_DEPLOY_ENABLED --repo "${github_repository}" --body "true"
 gh variable set AZURE_FUNCTION_APP_NAME --repo "${github_repository}" --body "${activity_function_name}"
 gh variable set AZURE_RESOURCE_GROUP --repo "${github_repository}" --body "${resource_group_name}"
 gh variable set AZURE_SUBSCRIPTION_ID --repo "${github_repository}" --body "${subscription_id}"
