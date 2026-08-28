@@ -111,6 +111,40 @@ jobs:
             exit 1
           fi
 
+          function_identity_client_id="$(az resource show \
+            --resource-group "${RESOURCE_GROUP}" \
+            --resource-type "Microsoft.Web/sites" \
+            --name "${function_app_name}" \
+            --query 'identity.userAssignedIdentities.*.clientId | [0]' \
+            --output tsv)"
+          if [[ -z "${function_identity_client_id}" ]]; then
+            echo "Azure Function user-assigned managed identity is unavailable." >&2
+            exit 1
+          fi
+
+          az functionapp config appsettings set \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${function_app_name}" \
+            --settings \
+              "KAFKA_BROKERS=10.42.1.4:9094" \
+              "COSMOS_DATABASE_NAME=orders-activity" \
+              "COSMOS_CONTAINER_NAME=events" \
+              "CosmosConnection__accountEndpoint=https://${function_app_name}.documents.azure.com:443/" \
+              "CosmosConnection__credential=managedidentity" \
+              "CosmosConnection__clientId=${function_identity_client_id}" \
+            --output none
+
+          configured_runtime_settings="$(az functionapp config appsettings list \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${function_app_name}" \
+            --query "[?name=='KAFKA_BROKERS' || name=='COSMOS_DATABASE_NAME' || name=='COSMOS_CONTAINER_NAME' || name=='CosmosConnection__accountEndpoint' || name=='CosmosConnection__credential' || name=='CosmosConnection__clientId'].name" \
+            --output tsv)"
+          if [[ "$(wc -w <<<"${configured_runtime_settings}")" -ne 6 ]]; then
+            echo "Azure Function runtime settings did not reconcile completely." >&2
+            printf '%s\n' "${configured_runtime_settings}" >&2
+            exit 1
+          fi
+
           ./mvnw --batch-mode --no-transfer-progress -pl order-activity-function -am -DskipTests package
           cd order-activity-function/target/azure-functions/order-activity-function
           zip -qr ../../../../order-activity-function.zip .
