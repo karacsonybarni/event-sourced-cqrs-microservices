@@ -153,6 +153,29 @@ jobs:
             --resource-group "${RESOURCE_GROUP}" \
             --name "${function_app_name}" \
             --src order-activity-function.zip
+
+          # Terraform changes are not applied by this workflow. Keep the Kafka
+          # trigger alive explicitly so private Kafka does not depend on the
+          # external Flex scale controller being able to reach the VM broker.
+          az functionapp scale config always-ready set \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${function_app_name}" \
+            --settings "function:projectOrderActivity=1" \
+            --output none
+
+          always_ready="$(az functionapp scale config show \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${function_app_name}" \
+            --query alwaysReady \
+            --output json)"
+          printf 'Azure Function always-ready configuration: %s\n' "${always_ready}"
+          jq -e '
+            if type == "array" then
+              any(.[]; ((.name // .target) == "function:projectOrderActivity") and .instanceCount == 1)
+            else
+              ((.name // .target) == "function:projectOrderActivity") and .instanceCount == 1
+            end
+          ' <<<"${always_ready}" >/dev/null
       - name: Deploy through Azure Run Command
         env:
           RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
@@ -179,4 +202,28 @@ jobs:
       - name: Verify the public serverless NoSQL projection
         env:
           GATEWAY_URL: ${{ vars.PUBLIC_API_URL }}
-        run: ./scripts/serverless-smoke-test.sh
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          VM_NAME: ${{ vars.AZURE_VM_NAME }}
+        run: |
+          if ./scripts/serverless-smoke-test.sh; then
+            exit 0
+          fi
+
+          echo "Serverless smoke failed; collecting Kafka diagnostics from the Azure VM." >&2
+          az vm run-command invoke \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${VM_NAME}" \
+            --command-id RunShellScript \
+            --scripts '
+              echo "=== Kafka VNET listener ==="
+              timeout 5 bash -c "</dev/tcp/10.42.1.4/9094" && echo "10.42.1.4:9094 reachable on VM" || true
+              echo "=== Activity consumer group ==="
+              docker exec cqrs-orders-kafka-1 /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --group order-activity-function-v1 --describe || true
+              echo "=== Orders topic offsets ==="
+              docker exec cqrs-orders-kafka-1 /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic orders.events.v1 || true
+              echo "=== Activity DLT ==="
+              timeout 10 docker exec cqrs-orders-kafka-1 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic orders.events.v1.activity.DLT --from-beginning --max-messages 10 || true
+            ' \
+            --query 'value[].message' \
+            --output tsv || true
+          exit 1
