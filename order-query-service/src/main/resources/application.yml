@@ -16,7 +16,9 @@ spring:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
-      group-id: order-query-projection-v1
+      # v2 understands saga terminal events. A distinct rollout group prevents
+      # an older v1 replica from consuming and dead-lettering those events.
+      group-id: order-query-projection-v2
       auto-offset-reset: earliest
       enable-auto-commit: false
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer

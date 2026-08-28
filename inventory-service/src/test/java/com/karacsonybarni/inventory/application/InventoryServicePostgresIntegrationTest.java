@@ -107,6 +107,22 @@ class InventoryServicePostgresIntegrationTest {
     }
 
     @Test
+    void rejectsDuplicateProductQuantitiesThatOverflowWithoutPoisoningTheSaga() {
+        UUID orderId = UUID.randomUUID();
+
+        service.reserve(orderId, List.of(
+                new RequestedItem("mechanical-keyboard", Integer.MAX_VALUE),
+                new RequestedItem("mechanical-keyboard", 1)));
+
+        assertThat(available("mechanical-keyboard")).isEqualTo(100);
+        assertThat(eventStore.load(orderId)).satisfies(reservation -> {
+            assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.REJECTED);
+            assertThat(reservation.getReason()).isEqualTo("Requested quantity exceeds the supported maximum");
+        });
+        assertThat(inventoryEventTypes(orderId)).containsExactly("InventoryRejected.v1");
+    }
+
+    @Test
     void cancellationReleasesStockOnceAndPublishesOneCompensationEvent() {
         UUID orderId = UUID.randomUUID();
         service.reserve(orderId, List.of(new RequestedItem("mechanical-keyboard", 2)));

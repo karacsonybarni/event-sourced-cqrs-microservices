@@ -15,10 +15,6 @@ if ! grep --quiet '^INVENTORY_DB_PASSWORD=' "${runtime_environment}"; then
   printf 'INVENTORY_DB_PASSWORD=%s\n' "${inventory_db_password}" >>"${runtime_environment}"
 fi
 
-if ! grep --quiet '^SAGA_ACTIVATION_AT=' "${runtime_environment}"; then
-  printf 'SAGA_ACTIVATION_AT=%s\n' "$(date --utc --iso-8601=seconds)" >>"${runtime_environment}"
-fi
-
 cd "${repository_root}"
 
 compose=(
@@ -29,8 +25,17 @@ compose=(
 )
 
 ./mvnw --batch-mode --no-transfer-progress -DskipTests package
+"${compose[@]}" build
 
-if ! "${compose[@]}" up --build --detach --wait --remove-orphans \
+if ! grep --quiet '^SAGA_ACTIVATION_AT=' "${runtime_environment}"; then
+  # Finish all fallible preparation first, then quiesce command ingress before
+  # fixing the one-time boundary. A failed rollout can now be retried without
+  # leaving accepted orders on the wrong side of an already-persisted cutoff.
+  "${compose[@]}" stop api-gateway order-command-service
+  printf 'SAGA_ACTIVATION_AT=%s\n' "$(date --utc --iso-8601=seconds)" >>"${runtime_environment}"
+fi
+
+if ! "${compose[@]}" up --no-build --detach --wait --remove-orphans \
   --scale order-command-service=2 \
   --scale order-query-service=2; then
   "${compose[@]}" logs --no-color --tail 200 >&2 || true

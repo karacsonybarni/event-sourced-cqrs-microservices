@@ -7,11 +7,10 @@ test:
 	./mvnw test
 
 up:
-	./mvnw -DskipTests package
-	docker compose --profile ui up --build -d --wait --scale order-command-service=2 --scale order-query-service=2
+	./scripts/local/runtime-up.sh
 
 down:
-	docker compose --profile ui down --volumes --remove-orphans
+	./scripts/local/runtime-down.sh
 
 smoke:
 	EXPECTED_COMMAND_INSTANCES=2 EXPECTED_QUERY_INSTANCES=2 EXPECTED_INVENTORY_INSTANCES=1 ./scripts/smoke-test.sh

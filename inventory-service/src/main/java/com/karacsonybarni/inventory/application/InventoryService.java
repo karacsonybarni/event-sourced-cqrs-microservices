@@ -39,7 +39,16 @@ public class InventoryService {
             return;
         }
 
-        Map<String, Integer> requestedQuantityByProduct = combineQuantities(requestedItems);
+        Map<String, Integer> requestedQuantityByProduct;
+        try {
+            requestedQuantityByProduct = combineQuantities(requestedItems);
+        } catch (ArithmeticException ignored) {
+            eventStore.create(InventoryReservation.reject(
+                    orderId,
+                    "Requested quantity exceeds the supported maximum",
+                    clock.instant()));
+            return;
+        }
         List<StockItem> lockedStock = stockItemRepository.findAllByProductIdForUpdate(
                 requestedQuantityByProduct.keySet());
         Map<String, StockItem> stockByProduct = lockedStock.stream()
