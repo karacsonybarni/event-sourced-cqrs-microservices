@@ -85,6 +85,32 @@ jobs:
             sleep 10
           done
 
+          legacy_storage_settings="$(az functionapp config appsettings list \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${function_app_name}" \
+            --query "[?name=='AzureWebJobsStorage' || name=='DEPLOYMENT_STORAGE_CONNECTION_STRING'].name" \
+            --output tsv)"
+          if [[ -n "${legacy_storage_settings}" ]]; then
+            printf 'Removing conflicting legacy Function storage settings:\n%s\n' "${legacy_storage_settings}"
+            mapfile -t legacy_storage_setting_names <<<"${legacy_storage_settings}"
+            az functionapp config appsettings delete \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${function_app_name}" \
+              --setting-names "${legacy_storage_setting_names[@]}" \
+              --output none
+          fi
+
+          remaining_legacy_storage_settings="$(az functionapp config appsettings list \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${function_app_name}" \
+            --query "[?name=='AzureWebJobsStorage' || name=='DEPLOYMENT_STORAGE_CONNECTION_STRING'].name" \
+            --output tsv)"
+          if [[ -n "${remaining_legacy_storage_settings}" ]]; then
+            echo "Conflicting legacy Function storage settings remain after cleanup." >&2
+            printf '%s\n' "${remaining_legacy_storage_settings}" >&2
+            exit 1
+          fi
+
           ./mvnw --batch-mode --no-transfer-progress -pl order-activity-function -am -DskipTests package
           cd order-activity-function/target/azure-functions/order-activity-function
           zip -qr ../../../../order-activity-function.zip .
