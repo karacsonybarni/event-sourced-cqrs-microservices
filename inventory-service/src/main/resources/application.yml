@@ -47,6 +47,9 @@ orders:
   events:
     topic: orders.events.v1
 
+saga:
+  activation-at: ${SAGA_ACTIVATION_AT:1970-01-01T00:00:00Z}
+
 management:
   endpoints:
     web:

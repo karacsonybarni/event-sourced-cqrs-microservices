@@ -1,6 +1,7 @@
 package com.karacsonybarni.inventory.messaging;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -10,6 +11,7 @@ import com.karacsonybarni.inventory.infrastructure.ProcessedEvent;
 import com.karacsonybarni.inventory.infrastructure.ProcessedEventRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,16 +32,19 @@ public class InventorySagaListener {
     private final ProcessedEventRepository processedEventRepository;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final Instant activationAt;
 
     public InventorySagaListener(
             InventoryService inventoryService,
             ProcessedEventRepository processedEventRepository,
             ObjectMapper objectMapper,
-            Clock clock) {
+            Clock clock,
+            @Value("${saga.activation-at:1970-01-01T00:00:00Z}") String activationAt) {
         this.inventoryService = inventoryService;
         this.processedEventRepository = processedEventRepository;
         this.objectMapper = objectMapper;
         this.clock = clock;
+        this.activationAt = Instant.parse(activationAt);
     }
 
     @KafkaListener(topics = "${orders.events.topic}")
@@ -54,6 +59,12 @@ public class InventorySagaListener {
 
         String eventType = requiredText(envelope, "eventType");
         UUID orderId = UUID.fromString(requiredText(envelope, "aggregateId"));
+        Instant occurredAt = Instant.parse(requiredText(envelope, "occurredAt"));
+        if (occurredAt.isBefore(activationAt)) {
+            processedEventRepository.save(new ProcessedEvent(eventId, clock.instant()));
+            LOGGER.info("Grandfathered pre-saga {} event {} for order {}", eventType, eventId, orderId);
+            return;
+        }
         switch (eventType) {
             case ORDER_CREATED -> inventoryService.reserve(orderId, requestedItems(envelope.required("payload")));
             case ORDER_CANCELLED -> inventoryService.release(orderId);

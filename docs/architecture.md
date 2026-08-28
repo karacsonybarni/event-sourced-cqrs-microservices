@@ -211,6 +211,8 @@ The command PostgreSQL instance owns order event streams, command idempotency re
 
 The read model can be rebuilt by resetting its projection state and replaying `orders.events.v1` from the beginning while retained Kafka history is available. A longer-term rebuild strategy can republish the authoritative database event stream into a new topic or consumer group. That operational action must be controlled so a live projection is not accidentally mixed with a partial replay.
 
+The first saga rollout does not use Kafka retention as a migration boundary. Cloud deployment persists a `SAGA_ACTIVATION_AT` timestamp before replacing the services; Inventory acknowledges but does not reserve for older order events. In the same release, the command-store migration appends a deterministic confirmation event to every previously accepted, still-created order. This grandfathers the complete pre-saga population without reducing newly seeded inventory. Fresh installations use the Unix epoch and process their entire event history normally.
+
 ## Failure modes
 
 | Failure | Observable result | Recovery |

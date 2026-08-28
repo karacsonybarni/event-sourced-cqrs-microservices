@@ -5,6 +5,9 @@ spring:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5433/orders_command}
     username: ${DATABASE_USERNAME:orders}
     password: ${DATABASE_PASSWORD:orders}
+  flyway:
+    placeholders:
+      sagaActivationAt: ${SAGA_ACTIVATION_AT:1970-01-01T00:00:00Z}
   jpa:
     open-in-view: false
     hibernate:

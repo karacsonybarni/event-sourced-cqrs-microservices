@@ -22,6 +22,8 @@ Event-source the `InventoryReservation` lifecycle. Its stream is authoritative f
 
 Publish both order and inventory event-store inserts through Debezium change data capture. Do not add a separate outbox row for a fact already represented by an authoritative domain event. Each consumer records the incoming `eventId` in the same local transaction as its state change, making at-least-once delivery idempotent. Failures retry twice and then move to a consumer-specific dead-letter topic.
 
+Treat the first deployment as an explicit cutover. The deploy script persists `SAGA_ACTIVATION_AT` before replacing the runtime, and Inventory records but does not act on order events whose business timestamp predates it. The command-store migration appends a deterministic `OrderConfirmed.v1` to every pre-saga order whose stream contains only `OrderCreated.v1`. Those already accepted orders are therefore grandfathered without consuming newly seeded stock, including orders older than Kafka retention. Fresh environments use the Unix epoch because they have no legacy orders.
+
 ## Consequences
 
 Positive:
@@ -32,6 +34,7 @@ Positive:
 - compensation is an explicit business event rather than a hidden cleanup;
 - CDC publishes the authoritative event once, without a duplicate outbox representation;
 - success, rejection, duplicate delivery, and late-result behavior are independently testable.
+- the first deployment has deterministic semantics for all historical orders, independent of Kafka retention.
 
 Negative:
 
@@ -39,6 +42,7 @@ Negative:
 - another service, PostgreSQL database, Debezium connector, Kafka topic, inbox tables, and dead-letter topics increase operational cost;
 - the stock balance cannot be rebuilt from reservation events alone and still needs conventional backup and recovery;
 - cancellation completion is eventually consistent across Order and Inventory;
+- grandfathered orders retain their historical acceptance but do not claim stock from the new Inventory service;
 - choreography becomes difficult to reason about as participants, deadlines, or branching rules grow.
 
 ## Boundary for reconsideration

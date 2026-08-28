@@ -70,14 +70,15 @@ export async function findOrders(
 
 export async function waitForOrder(
   orderId: string,
-  expectedStatus: OrderStatus,
+  expectedStatus: OrderStatus | readonly OrderStatus[],
   timeoutMs = 20_000,
 ): Promise<OrderDetails> {
+  const expectedStatuses = Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus];
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
       const order = await getOrder(orderId);
-      if (order.status === expectedStatus) {
+      if (expectedStatuses.includes(order.status)) {
         return order;
       }
     } catch (error) {
@@ -87,7 +88,9 @@ export async function waitForOrder(
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  throw new Error(`Read model did not reach ${expectedStatus} within ${timeoutMs / 1000} seconds`);
+  throw new Error(
+    `Read model did not reach ${expectedStatuses.join(' or ')} within ${timeoutMs / 1000} seconds`,
+  );
 }
 
 export async function waitForOrderActivity(

@@ -15,6 +15,10 @@ if ! grep --quiet '^INVENTORY_DB_PASSWORD=' "${runtime_environment}"; then
   printf 'INVENTORY_DB_PASSWORD=%s\n' "${inventory_db_password}" >>"${runtime_environment}"
 fi
 
+if ! grep --quiet '^SAGA_ACTIVATION_AT=' "${runtime_environment}"; then
+  printf 'SAGA_ACTIVATION_AT=%s\n' "$(date --utc --iso-8601=seconds)" >>"${runtime_environment}"
+fi
+
 cd "${repository_root}"
 
 compose=(

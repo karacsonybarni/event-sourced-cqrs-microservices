@@ -6,7 +6,7 @@ This deployment keeps the complete event-sourced CQRS topology available on Azur
 
 Verified React order portal and API endpoint: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
 
-The deployment runs in Poland Central. The delivery workflow verifies the public order saga, both Debezium connectors, two command replicas, two query replicas, the Inventory service, single-replica failover, HTTPS certificate, management-port isolation, and Terraform state.
+The deployment runs in Poland Central. The delivery workflow verifies the public order saga, both Debezium connectors, two command replicas, two query replicas, the Inventory service, HTTPS certificate, management-port isolation, and Terraform state. Replica failover remains an explicit manual check described below.
 
 The tested `Standard_B2as_v2` VM has two vCPUs and 8 GiB of memory. It is not one of Azure's 12-month free VM shapes; the Azure Free Account's promotional credit funds it. `scripts/azure/verify-free-plan.sh` blocks provisioning unless the subscription is `Enabled` and its spending limit is `On`, so Azure stops resources instead of charging a payment method when included credit is exhausted. The public service therefore remains available only while promotional credit or another credit-backed allowance remains active.
 

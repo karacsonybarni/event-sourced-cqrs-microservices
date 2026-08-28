@@ -42,7 +42,8 @@ class InventorySagaListenerTest {
                 inventoryService,
                 processedEventRepository,
                 JsonMapper.builder().findAndAddModules().build(),
-                clock);
+                clock,
+                "2026-01-01T00:00:00Z");
     }
 
     @Test
@@ -55,6 +56,7 @@ class InventorySagaListenerTest {
                   "eventId": "%s",
                   "eventType": "OrderCreated.v1",
                   "aggregateId": "%s",
+                  "occurredAt": "2026-01-10T10:15:30Z",
                   "payload": {
                     "items": [
                       {"productId": "keyboard", "quantity": 1},
@@ -97,6 +99,7 @@ class InventorySagaListenerTest {
                   "eventId": "%s",
                   "eventType": "OrderCancelled.v1",
                   "aggregateId": "%s",
+                  "occurredAt": "2026-01-10T10:15:30Z",
                   "payload": {}
                 }
                 """.formatted(eventId, orderId);
@@ -104,6 +107,28 @@ class InventorySagaListenerTest {
         listener.handle(event);
 
         verify(inventoryService).release(orderId);
+        verify(processedEventRepository).save(any(ProcessedEvent.class));
+    }
+
+    @Test
+    void eventBeforeSagaActivationIsGrandfatheredWithoutInventoryWork() throws Exception {
+        UUID eventId = UUID.randomUUID();
+        UUID orderId = UUID.randomUUID();
+        when(processedEventRepository.existsById(eventId)).thenReturn(false);
+        String event = """
+                {
+                  "eventId": "%s",
+                  "eventType": "OrderCreated.v1",
+                  "aggregateId": "%s",
+                  "occurredAt": "2025-12-31T23:59:59Z",
+                  "payload": {"items": [{"productId": "keyboard", "quantity": 1}]}
+                }
+                """.formatted(eventId, orderId);
+
+        listener.handle(event);
+
+        verify(inventoryService, never()).reserve(any(), any());
+        verify(inventoryService, never()).release(any());
         verify(processedEventRepository).save(any(ProcessedEvent.class));
     }
 }

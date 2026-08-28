@@ -174,10 +174,12 @@ export default function App() {
     try {
       const result = await createOrder(request, newIdempotencyKey());
       setMessage(`Command accepted for order ${shortId(result.command.orderId)}. Waiting for inventory…`);
-      const projected = await waitForOrder(result.command.orderId, 'CONFIRMED');
+      const projected = await waitForOrder(result.command.orderId, ['CONFIRMED', 'REJECTED']);
       setSelectedOrder(projected);
       await loadOrders();
-      setMessage(`Order ${shortId(projected.orderId)} is visible at event version ${projected.version}.`);
+      setMessage(projected.status === 'REJECTED'
+        ? `Inventory rejected order ${shortId(projected.orderId)}: ${projected.rejectionReason ?? 'No reason supplied'}.`
+        : `Order ${shortId(projected.orderId)} is visible at event version ${projected.version}.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The order could not be created.');
     } finally {

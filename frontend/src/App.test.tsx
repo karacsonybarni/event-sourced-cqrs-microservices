@@ -28,6 +28,12 @@ const createdOrder = {
 };
 const confirmedOrder = { ...createdOrder, status: 'CONFIRMED', version: 2 };
 const cancelledOrder = { ...confirmedOrder, status: 'CANCELLED', version: 3 };
+const rejectedOrder = {
+  ...createdOrder,
+  status: 'REJECTED',
+  rejectionReason: 'Insufficient stock for mechanical-keyboard',
+  version: 2,
+};
 
 describe('App', () => {
   afterEach(() => {
@@ -91,5 +97,22 @@ describe('App', () => {
     expect(fetchMock.mock.calls[4]?.[0]).toBe(`/api/orders/${orderId}/cancellation`);
     expect(String(fetchMock.mock.calls[6]?.[0])).toContain('status=CANCELLED');
     expect(fetchMock.mock.calls[7]?.[0]).toBe(`/serverless/api/activity/${orderId}`);
+  });
+
+  it('presents inventory rejection as the terminal result of a manual submission', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(command, 202, { 'Idempotent-Replay': 'false' }))
+      .mockResolvedValueOnce(jsonResponse(rejectedOrder))
+      .mockResolvedValueOnce(jsonResponse({ content: [rejectedOrder], totalElements: 1 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Submit order command' }));
+
+    expect(await screen.findByText(/Inventory rejected order .*Insufficient stock/)).toBeVisible();
+    expect(screen.getByText('Inventory rejected this order: Insufficient stock for mechanical-keyboard')).toBeVisible();
+    expect(screen.getAllByText('REJECTED').length).toBeGreaterThan(0);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });

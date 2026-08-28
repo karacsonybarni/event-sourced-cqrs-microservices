@@ -218,6 +218,7 @@ services:
       EUREKA_LEASE_RENEWAL_INTERVAL_SECONDS: 5
       EUREKA_LEASE_EXPIRATION_SECONDS: 15
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SAGA_ACTIVATION_AT: ${SAGA_ACTIVATION_AT:-1970-01-01T00:00:00Z}
     ports:
       - "8081"
     depends_on:
@@ -246,6 +247,7 @@ services:
       EUREKA_URL: http://discovery-server:8761/eureka/
       EUREKA_LEASE_RENEWAL_INTERVAL_SECONDS: 5
       EUREKA_LEASE_EXPIRATION_SECONDS: 15
+      SAGA_ACTIVATION_AT: ${SAGA_ACTIVATION_AT:-1970-01-01T00:00:00Z}
     ports:
       - "8084"
     depends_on:
