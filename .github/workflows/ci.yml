@@ -3,7 +3,8 @@ name: CI
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    # Bootstrap exact-SHA CI for this migration before workflow_dispatch exists on main.
+    branches: [main, codex/kubernetes-azure-showcase]
   pull_request:
 
 permissions:
