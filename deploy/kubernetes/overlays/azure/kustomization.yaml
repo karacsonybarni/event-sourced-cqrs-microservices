@@ -26,12 +26,20 @@ patches:
       group: apps
       version: v1
       kind: Deployment
-      name: edge-proxy
     patch: |-
       - op: add
         path: /spec/template/metadata/annotations
         value:
-          event-sourced-cqrs/deployment-revision: DEPLOYMENT_REVISION
+          event-sourced-cqrs/runtime-config-revision: RUNTIME_CONFIG_REVISION
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: edge-proxy
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations/event-sourced-cqrs~1deployment-revision
+        value: DEPLOYMENT_REVISION
 labels:
   - pairs:
       app.kubernetes.io/environment: azure

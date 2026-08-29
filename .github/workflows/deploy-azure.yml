@@ -284,9 +284,9 @@ jobs:
                 ;;
             esac
           done
-          edge_revision="$(sudo k3s kubectl --namespace cqrs-orders get deployment/edge-proxy --output jsonpath='{.spec.template.metadata.annotations.event-sourced-cqrs/deployment-revision}')"
-          if [[ "${edge_revision}" != "${expected_revision}" ]]; then
-            printf 'Edge deployment uses unexpected revision %s.\n' "${edge_revision}" >&2
+          edge_revision="\$(sudo k3s kubectl --namespace cqrs-orders get deployment/edge-proxy --output jsonpath='{.spec.template.metadata.annotations.event-sourced-cqrs/deployment-revision}')"
+          if [[ "\${edge_revision}" != "\${expected_revision}" ]]; then
+            printf 'Edge deployment uses unexpected revision %s.\n' "\${edge_revision}" >&2
             exit 1
           fi
           sudo k3s kubectl --namespace cqrs-orders wait --for=condition=Available deployment --all --timeout=180s

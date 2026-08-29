@@ -53,10 +53,11 @@ jobs:
             esac
           done
 
-          if [[ "${integration_required}" == "false" && "${EVENT_NAME}" == "push" ]]; then
+          if [[ "${integration_required}" == "false" && \
+                ("${EVENT_NAME}" == "push" || "${EVENT_NAME}" == "workflow_dispatch") ]]; then
             parent_ci_success="$(gh api \
               -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${base_sha}&event=push&per_page=100" \
+              "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${base_sha}&status=completed&per_page=100" \
               --jq '[.workflow_runs[] | select(.name == "CI" and .status == "completed" and .conclusion == "success")] | length' \
               2>/dev/null || true)"
             if [[ ! "${parent_ci_success}" =~ ^[1-9][0-9]*$ ]]; then

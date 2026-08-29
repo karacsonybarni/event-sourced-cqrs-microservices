@@ -28,7 +28,7 @@ Use Kubernetes Services for application discovery. The gateway receives direct K
 
 Keep the three PostgreSQL databases, Kafka, and Debezium in Docker Compose for this increment. Selectorless Kubernetes Services and explicit EndpointSlices expose those platform dependencies to pods over the VM's private address. The K3s pod CIDR is `10.244.0.0/16`, deliberately separated from the Azure virtual network's `10.42.0.0/16` range.
 
-Build application images from the exact deployment commit on the VM, import them into the single node's containerd image store, and deploy that immutable SHA as the image tag. Pin the external Caddy image by digest. This avoids a new registry and credential boundary while the cluster has exactly one node. A multi-node cluster must use a real registry and must not retain this node-local image path.
+Build application images from the exact deployment commit on the VM, import them into the single node's containerd image store, and deploy that immutable SHA as the image tag. Pin the external Caddy image by digest. Retain only the active and immediately preceding application revisions in Docker and containerd, and cap Buildx cache at 2 GiB after a successful deployment. This avoids both a new registry credential boundary and unbounded image growth while the cluster has exactly one node. A multi-node cluster must use a real registry and must not retain this node-local image path.
 
 ## Consequences
 
@@ -36,7 +36,8 @@ Build application images from the exact deployment commit on the VM, import them
 - Azure no longer runs Eureka. Kubernetes DNS and Services own application discovery and gateway load balancing there; local Compose continues to demonstrate Eureka-specific behavior.
 - Existing PostgreSQL, Kafka, Debezium data, replication slots, connector offsets, and event history remain in place without a risky storage migration.
 - The host operates both K3s and Docker Compose. This is a deliberate transitional boundary, not a preferred long-term production topology.
-- The first migration briefly stops the Compose application tier before packaging and image builds so the constrained VM cannot exceed its measured memory headroom. A failed first cutover deletes the incomplete namespace and restores the Compose application tier; later failed rollouts restore the previously captured Deployment specifications.
+- The first migration briefly stops the Compose application tier before packaging and image builds so the constrained VM cannot exceed its measured memory headroom. Recovery is registered before the stateful Compose bridge is reconciled. A failed first cutover deletes the incomplete namespace and restores the full legacy Compose topology, including the platform port bindings; later failed rollouts restore the previously captured runtime Secret, ConfigMap, and Deployment specifications.
+- A deterministic digest of the runtime configuration is attached to every pod template. Changing a runtime setting therefore rolls the same Git revision instead of leaving pods on stale environment values; the digest reveals no secret value.
 - The five application Deployments roll without planned downtime, but the single Caddy replica uses a `Recreate` strategy because its node-local certificate volume is `ReadWriteOnce`; an edge configuration rollout can therefore cause a brief connection interruption.
 - The single node, local-path Caddy volume, and node-local application images are not highly available. A host failure stops the synchronous path and Kafka processing.
 - Horizontal Pod Autoscalers and PodDisruptionBudgets are intentionally absent. No representative load target has justified autoscaling, and a disruption budget on one node would not create availability.
