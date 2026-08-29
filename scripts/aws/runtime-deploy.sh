@@ -32,7 +32,8 @@ if ! grep --quiet '^SAGA_ACTIVATION_AT=' "${runtime_environment}"; then
   # fixing the one-time boundary. A failed rollout can now be retried without
   # leaving accepted orders on the wrong side of an already-persisted cutoff.
   "${compose[@]}" stop api-gateway order-command-service
-  printf 'SAGA_ACTIVATION_AT=%s\n' "$(date --utc --iso-8601=seconds)" >>"${runtime_environment}"
+  saga_activation_at="$(date --utc +%Y-%m-%dT%H:%M:%S.%NZ)"
+  printf 'SAGA_ACTIVATION_AT=%sZ\n' "${saga_activation_at:0:26}" >>"${runtime_environment}"
 fi
 
 if ! "${compose[@]}" up --no-build --detach --wait --remove-orphans \

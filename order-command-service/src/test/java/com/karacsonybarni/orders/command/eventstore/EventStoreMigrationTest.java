@@ -19,6 +19,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @Testcontainers
 class EventStoreMigrationTest {
 
+    private static final Instant SAGA_ACTIVATION_AT = Instant.parse("2026-01-11T00:00:00.750123Z");
+
     @Container
     private static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18-alpine");
 
@@ -31,6 +33,7 @@ class EventStoreMigrationTest {
         UUID grandfatheredOrderId = UUID.randomUUID();
         UUID postCutoverOrderId = UUID.randomUUID();
         Instant createdAt = Instant.parse("2026-01-10T10:15:30Z");
+        Instant grandfatheredCreatedAt = Instant.parse("2026-01-11T00:00:00.750122Z");
         Instant cancelledAt = createdAt.plusSeconds(60);
         jdbcTemplate.update("""
                 INSERT INTO orders (
@@ -48,8 +51,8 @@ class EventStoreMigrationTest {
                 """, orderId, "keyboard", 2, new BigDecimal("49.90"));
         flyway("2").migrate();
 
-        insertCreatedStream(jdbcTemplate, grandfatheredOrderId, createdAt);
-        insertCreatedStream(jdbcTemplate, postCutoverOrderId, Instant.parse("2026-01-12T10:15:30Z"));
+        insertCreatedStream(jdbcTemplate, grandfatheredOrderId, grandfatheredCreatedAt);
+        insertCreatedStream(jdbcTemplate, postCutoverOrderId, Instant.parse("2026-01-11T00:00:00.750124Z"));
 
         flyway(null).migrate();
 
@@ -87,7 +90,7 @@ class EventStoreMigrationTest {
                 FROM order_events
                 WHERE aggregate_id = ? AND aggregate_version = 2
                 """, String.class, grandfatheredOrderId);
-        assertThat(Instant.parse(confirmedAt)).isEqualTo(createdAt);
+        assertThat(Instant.parse(confirmedAt)).isEqualTo(grandfatheredCreatedAt);
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT payload -> 'payload' ->> 'status'
                 FROM order_events
@@ -105,7 +108,7 @@ class EventStoreMigrationTest {
                 SELECT activation_at
                 FROM saga_configuration
                 WHERE configuration_key = 'inventory-saga-activation'
-                """, Instant.class)).isEqualTo(Instant.parse("2026-01-11T00:00:00Z"));
+                """, Instant.class)).isEqualTo(SAGA_ACTIVATION_AT);
     }
 
     private void insertCreatedStream(JdbcTemplate jdbcTemplate, UUID orderId, Instant occurredAt) {
@@ -148,7 +151,7 @@ class EventStoreMigrationTest {
 
     private Flyway flyway(String target) {
         var configuration = Flyway.configure()
-                .placeholders(Map.of("sagaActivationAt", "2026-01-11T00:00:00Z"))
+                .placeholders(Map.of("sagaActivationAt", SAGA_ACTIVATION_AT.toString()))
                 .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         if (target != null) {
             configuration.target(target);
