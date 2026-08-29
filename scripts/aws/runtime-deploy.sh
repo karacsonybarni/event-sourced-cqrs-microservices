@@ -11,8 +11,10 @@ fi
 
 if ! grep --quiet '^INVENTORY_DB_PASSWORD=' "${runtime_environment}"; then
   inventory_db_password="$(openssl rand -hex 24)"
-  umask 077
-  printf 'INVENTORY_DB_PASSWORD=%s\n' "${inventory_db_password}" >>"${runtime_environment}"
+  (
+    umask 077
+    printf 'INVENTORY_DB_PASSWORD=%s\n' "${inventory_db_password}" >>"${runtime_environment}"
+  )
 fi
 
 cd "${repository_root}"
