@@ -25,6 +25,7 @@ jobs:
     timeout-minutes: 30
     environment:
       name: cloud
+      url: ${{ steps.runtime.outputs.public_api_url }}
     env:
       DEPLOY_REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
