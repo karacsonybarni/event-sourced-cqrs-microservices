@@ -1,5 +1,7 @@
 package com.karacsonybarni.orders.activity;
 
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -17,6 +19,14 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 public class OrderActivityQueryFunction {
+
+    private static final List<String> PUBLIC_FIELDS = List.of(
+            "id",
+            "orderId",
+            "eventType",
+            "aggregateVersion",
+            "occurredAt",
+            "payload");
 
     private final ObjectMapper objectMapper;
     private final OrderActivityStore activityStore;
@@ -40,7 +50,10 @@ public class OrderActivityQueryFunction {
             @BindingName("orderId") String orderId,
             ExecutionContext context) throws JacksonException {
         try {
-            String response = objectMapper.writeValueAsString(activityStore.findByOrderId(orderId));
+            List<Map<String, Object>> activity = activityStore.findByOrderId(orderId).stream()
+                    .map(OrderActivityQueryFunction::publicDocument)
+                    .toList();
+            String response = objectMapper.writeValueAsString(activity);
             return request.createResponseBuilder(HttpStatus.OK)
                     .header("Content-Type", "application/json")
                     .body(response)
@@ -50,13 +63,21 @@ public class OrderActivityQueryFunction {
                     "Cosmos activity query failed with status " + exception.getStatusCode()
                             + " and substatus " + exception.getSubStatusCode());
             String response = objectMapper.writeValueAsString(Map.of(
-                    "error", "cosmos-query-failed",
-                    "statusCode", exception.getStatusCode(),
-                    "subStatusCode", exception.getSubStatusCode()));
+                    "error", "activity-query-unavailable"));
             return request.createResponseBuilder(HttpStatus.SERVICE_UNAVAILABLE)
                     .header("Content-Type", "application/json")
                     .body(response)
                     .build();
         }
+    }
+
+    static Map<String, Object> publicDocument(Map<String, Object> document) {
+        Map<String, Object> publicDocument = new LinkedHashMap<>();
+        for (String field : PUBLIC_FIELDS) {
+            if (document.containsKey(field)) {
+                publicDocument.put(field, document.get(field));
+            }
+        }
+        return publicDocument;
     }
 }

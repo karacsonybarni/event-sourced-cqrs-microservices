@@ -56,7 +56,11 @@ final class OrderActivityDocumentMapper {
     }
 
     private JsonNode unwrapKafkaEvent(String serializedEvent) throws JacksonException {
-        JsonNode kafkaEvent = objectMapper.readTree(serializedEvent);
+        if (serializedEvent == null || serializedEvent.isBlank()) {
+            throw new IllegalArgumentException("Kafka event must contain a JSON object");
+        }
+
+        JsonNode kafkaEvent = requiredObject(objectMapper.readTree(serializedEvent), "Kafka event");
         JsonNode value = kafkaEvent.get("Value");
         if (value == null) {
             return kafkaEvent;
@@ -71,7 +75,14 @@ final class OrderActivityDocumentMapper {
         if (serializedValue.isBlank()) {
             throw new IllegalArgumentException("Kafka event Value must not be blank");
         }
-        return objectMapper.readTree(serializedValue);
+        return requiredObject(objectMapper.readTree(serializedValue), "Kafka event Value");
+    }
+
+    private JsonNode requiredObject(JsonNode node, String description) {
+        if (node == null || !node.isObject()) {
+            throw new IllegalArgumentException(description + " must contain a JSON object");
+        }
+        return node;
     }
 
     private String requiredText(JsonNode node, String fieldName) {

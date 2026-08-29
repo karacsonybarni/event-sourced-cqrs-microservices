@@ -51,6 +51,24 @@ class OrderActivityDocumentMapperTest {
     }
 
     @Test
+    void rejectsBlankKafkaEventsAsInvalidMessages() {
+        assertThatThrownBy(() -> mapper.map("   "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Kafka event must contain a JSON object");
+    }
+
+    @Test
+    void rejectsWrappedValuesThatDoNotContainAnEventObject() {
+        String kafkaEvent = objectMapper.createObjectNode()
+                .put("Value", "null")
+                .toString();
+
+        assertThatThrownBy(() -> mapper.map(kafkaEvent))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Kafka event Value must contain a JSON object");
+    }
+
+    @Test
     void producesTheSameDocumentWhenKafkaRedeliversAnEvent() throws JacksonException {
         String event = """
                 {

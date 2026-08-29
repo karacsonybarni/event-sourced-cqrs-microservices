@@ -91,6 +91,21 @@ class OrderActivityFunctionTest {
     }
 
     @Test
+    void routesBlankEventsToDeadLetterInsteadOfRetryingForever() {
+        String invalidEvent = "   ";
+        var store = new CapturingActivityStore();
+        var deadLetterOutput = new CapturingOutputBinding();
+        var function = new OrderActivityFunction(
+                new OrderActivityDocumentMapper(new ObjectMapper()),
+                store);
+
+        function.project(invalidEvent, deadLetterOutput, new TestExecutionContext());
+
+        assertThat(store.documents).isEmpty();
+        assertThat(deadLetterOutput.getValue()).isEqualTo(invalidEvent);
+    }
+
+    @Test
     void propagatesPersistenceFailuresInsteadOfDeadLetteringValidEvents() {
         String event = validEvent();
         var deadLetterOutput = new CapturingOutputBinding();
