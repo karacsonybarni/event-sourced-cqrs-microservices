@@ -37,17 +37,13 @@ if ! grep --quiet '^SAGA_ACTIVATION_AT=' "${runtime_environment}"; then
   printf 'SAGA_ACTIVATION_AT=%sZ\n' "${saga_activation_at:0:26}" >>"${runtime_environment}"
 fi
 
-if ! "${compose[@]}" up --no-build --detach --wait --remove-orphans \
+# Recreate the edge proxy in the same convergence operation as its upstreams.
+# This reloads the bind-mounted Caddy configuration without a second targeted
+# `compose up`, which can detach the edge from freshly replaced DNS endpoints.
+if ! "${compose[@]}" up --no-build --detach --wait --remove-orphans --force-recreate \
   --scale order-command-service=2 \
   --scale order-query-service=2; then
   "${compose[@]}" logs --no-color --tail 200 >&2 || true
-  exit 1
-fi
-
-# Caddy loads its bind-mounted configuration at startup, so recreate only the
-# edge container to apply routing or security-header changes on every release.
-if ! "${compose[@]}" up --detach --force-recreate --no-deps --wait edge-proxy; then
-  "${compose[@]}" logs --no-color --tail 200 edge-proxy >&2 || true
   exit 1
 fi
 
