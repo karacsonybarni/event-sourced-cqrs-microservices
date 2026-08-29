@@ -42,18 +42,18 @@ variable "environment" {
 }
 
 variable "vm_size" {
-  description = "Credit-backed x86 VM shape with the measured eight-GiB capacity required by the complete topology."
+  description = "Credit-backed x86 VM shape with measured capacity for K3s plus the retained stateful platform."
   type        = string
   default     = "Standard_B2as_v2"
 
   validation {
     condition     = var.vm_size == "Standard_B2as_v2"
-    error_message = "vm_size must use the tested two-vCPU/eight-GiB x86 shape."
+    error_message = "vm_size must use the tested two-vCPU/eight-GiB K3s host shape."
   }
 }
 
 variable "os_disk_size_gib" {
-  description = "Encrypted OS disk size for images, databases, Kafka, and build artifacts."
+  description = "Encrypted OS disk size for containerd images, Docker platform data, K3s state, and build artifacts."
   type        = number
   default     = 64
 

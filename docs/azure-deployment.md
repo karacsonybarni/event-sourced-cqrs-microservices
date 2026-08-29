@@ -2,50 +2,63 @@
 
 ## Purpose and cost boundary
 
-This deployment keeps the complete event-sourced CQRS topology available on Azure while the runtime remains economical and reproducible. Terraform provisions one hardened Linux VM, a Flex Consumption Function App, a free-tier Cosmos DB for NoSQL activity view, a stable public DNS name, HTTPS termination, versioned remote state, a cost budget, and a short-lived GitHub OIDC delivery identity.
+This deployment keeps the complete event-sourced CQRS topology available on Azure while adding a real Kubernetes application tier within the existing credit-protected cost model. Terraform provisions one hardened Linux VM, a Flex Consumption Function App, a free-tier Cosmos DB for NoSQL activity view, a stable public DNS name, HTTPS termination, versioned remote state, a cost budget, and a short-lived GitHub OIDC delivery identity. The VM runs a pinned K3s distribution for stateless workloads and Docker Compose for the retained stateful platform.
 
 Verified React order portal and API endpoint: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
 
-The deployment runs in Poland Central. The delivery workflow verifies the public order saga, both Debezium connectors, two command replicas, two query replicas, the Inventory service, HTTPS certificate, management-port isolation, and Terraform state. Replica failover remains an explicit manual check described below.
+The tested `Standard_B2as_v2` VM has two vCPUs and 8 GiB of memory. A measurement before the Kubernetes migration showed about 4.7 GiB in use and 3.1 GiB available. K3s replaces the Compose application containers and Eureka rather than duplicating them, leaving enough measured headroom for its control plane and containerd. This remains a constrained demonstration target, not a production capacity recommendation.
 
-The tested `Standard_B2as_v2` VM has two vCPUs and 8 GiB of memory. It is not one of Azure's 12-month free VM shapes; the Azure Free Account's promotional credit funds it. `scripts/azure/verify-free-plan.sh` blocks provisioning unless the subscription is `Enabled` and its spending limit is `On`, so Azure stops resources instead of charging a payment method when included credit is exhausted. The public service therefore remains available only while promotional credit or another credit-backed allowance remains active.
+The VM is not one of Azure's 12-month free shapes; promotional credit funds it. `scripts/azure/verify-free-plan.sh` blocks provisioning unless the subscription is `Enabled` and its spending limit is `On`, so Azure stops resources instead of charging a payment method when included credit is exhausted. The public service therefore remains available only while promotional credit or another credit-backed allowance remains active.
 
-The design avoids Marketplace products and keeps managed-service consumption bounded. Cosmos DB is fixed at 400 RU/s inside its lifetime free-tier allowance. The Function has no always-ready instances and can scale to zero, with a maximum of two on-demand instances. Three storage private endpoints add a small fixed hourly cost in exchange for denying public network access to the Function's blob, queue, and table services. A resource-group budget adds an early cost signal but is not a spending cap; the subscription spending limit is the no-charge boundary.
+The design avoids a multi-node Azure Kubernetes Service cluster because its recurring compute cost is outside the USD 25 resource-group budget. Cosmos DB is fixed at 400 RU/s inside its lifetime free-tier allowance. The Function keeps one Kafka projection instance always ready and caps burst scale at two instances. Three storage private endpoints add a small fixed hourly cost in exchange for denying public access to the Function's blob, queue, and table services. The budget is an alert, not a spending cap; the subscription spending limit is the no-charge boundary.
 
 ## Architecture
 
 ```mermaid
 flowchart TB
     Internet([Client]) -->|HTTPS 443| IP[Azure static IP + DNS]
-    IP --> Caddy[Caddy TLS proxy]
 
     subgraph VM[Azure Linux VM - 2 vCPU / 8 GiB]
-        Caddy -->|browser routes| Frontend[React + Nginx]
-        Caddy -->|/api| Gateway[Spring Cloud Gateway]
-        Gateway -->|Eureka + load balancing| Command[Command service - 2 replicas]
-        Gateway -->|Eureka + load balancing| Query[Query service - 2 replicas]
-        Command --> EventStore[(PostgreSQL event store)]
-        EventStore -->|logical replication| Debezium[Debezium Connect]
-        Debezium --> Kafka[Apache Kafka]
-        Kafka --> Inventory[Inventory service]
-        Inventory --> InventoryDB[(Inventory PostgreSQL)]
-        InventoryDB -->|logical replication| Debezium
-        Kafka --> Command
-        Kafka --> Query
-        Query --> QueryDB[(PostgreSQL read model)]
-        Kafka -->|private VNet listener| Function[Azure Function]
+        subgraph K3s[K3s - Kubernetes application tier]
+            ServiceLB[K3s ServiceLB] --> Caddy[Caddy edge Deployment]
+            Caddy --> Frontend[React + Nginx Deployment]
+            Caddy --> Gateway[Spring Gateway Deployment]
+            Gateway -->|Kubernetes Service DNS| Command[Command Deployment - 2 replicas]
+            Gateway -->|Kubernetes Service DNS| Query[Query Deployment - 2 replicas]
+            Inventory[Inventory Deployment]
+        end
+
+        subgraph Platform[Docker Compose - stateful platform]
+            EventStore[(Command PostgreSQL)] -->|logical replication| Debezium[Debezium Connect]
+            InventoryDB[(Inventory PostgreSQL)] -->|logical replication| Debezium
+            QueryDB[(Query PostgreSQL)]
+            Debezium --> Kafka[Apache Kafka]
+        end
+
+        Command --> EventStore
+        Command --> Kafka
+        Inventory --> InventoryDB
+        Inventory --> Kafka
+        Query --> QueryDB
+        Query --> Kafka
     end
 
+    Kafka -->|private VNet listener| Function[Azure Function]
     Function --> Cosmos[(Cosmos DB activity documents)]
     Function -->|private endpoints| FunctionStorage[(Function storage)]
-
     GitHub[GitHub Actions OIDC] -->|Azure Run Command| VM
     Terraform[Terraform] --> State[(Azure Blob state - private + versioned)]
 ```
 
-Only ports 80 and 443 are permitted by the network security group. Caddy redirects HTTP to HTTPS, obtains and renews the public certificate, routes `/api` requests directly to the private gateway, and routes browser paths to the React application served by Nginx. A restrictive content security policy keeps the browser application on the same origin. Eureka, Debezium, Kafka, databases, backend replicas, and Actuator management ports remain on the VM's private Docker network or loopback interface. SSH has no inbound rule; Azure Run Command is the normal administration and deployment path.
+Kubernetes owns the command, query, Inventory, gateway, frontend, and edge workloads in the `cqrs-orders` namespace. Deployments use immutable commit-SHA image tags, rolling-update policy, startup/readiness/liveness probes, graceful termination, explicit resource requests and limits, runtime-default seccomp, restricted service-account token mounting, and ingress NetworkPolicies. Kustomize owns the reusable base and Azure overlay. The edge keeps certificate state in a one-GiB local-path persistent volume.
 
-Two command replicas and two query replicas demonstrate application-level discovery, routing, and failover; Inventory remains one event-driven instance. Its 256 MiB database and 512 MiB service limits reduce the eight-GiB VM's spare headroom, so this topology demonstrates correctness rather than a production capacity target. The Function uses a dedicated delegated subnet to reach Kafka on the VM's private address; no Kafka port is permitted by the public network security group. A user-assigned managed identity accesses Function storage and Cosmos DB without account keys. Function storage denies traffic by default and exposes its required services through private endpoints and private DNS. The one-VM placement is a cost constraint, not infrastructure high availability: a VM or availability-zone failure stops the synchronous and Kafka paths. A production topology would move the services to a managed orchestrator, PostgreSQL to Flexible Server, and Kafka to a managed Kafka-compatible service across failure domains.
+Eureka is not deployed on Azure. The gateway receives direct Kubernetes Service URIs, and application pods disable the Eureka client. Local Compose retains Eureka so the local discovery and replica-failover exercise remains available.
+
+PostgreSQL, Kafka, and Debezium stay in Compose for this increment to preserve existing data volumes, replication slots, connector offsets, and event history. Selectorless Kubernetes Services with explicit EndpointSlices map stable in-cluster names to the VM's private `10.42.1.4` platform listeners. K3s uses `10.244.0.0/16` for pods and `10.96.0.0/12` for Services so neither range overlaps the Azure virtual network's `10.42.0.0/16` address space.
+
+Only ports 80 and 443 are public. K3s ServiceLB claims those host ports and forwards them to Caddy, which redirects HTTP to HTTPS, obtains and renews the certificate, routes `/api` to the gateway, `/serverless` to the Function, and browser paths to the frontend. PostgreSQL and Debezium bind only the VM's private address. The network security group permits the Function subnet to reach Kafka on `10.42.1.4:9094` and does not expose Kafka publicly. SSH has no inbound rule; Azure Run Command is the normal administration and deployment path.
+
+This one-node cluster is not highly available. A VM failure stops the synchronous path and Kafka processing, the Caddy volume is node-local, and images are imported into the single node's containerd store. A production topology should use multi-node AKS, a managed registry, managed multi-zone PostgreSQL, and a managed Kafka-compatible service. [ADR-007](adr/007-incremental-kubernetes-application-tier.md) records why this migration stops at the stateless boundary.
 
 ## Provision
 
@@ -94,23 +107,37 @@ The recovery SSH private key is generated under `AZURE_CONFIG_DIR` and is never 
 
 ## Delivery and verification
 
-`.github/workflows/deploy-azure.yml` runs after successful `main` CI when `AZURE_DEPLOY_ENABLED=true`, or by manual dispatch. GitHub exchanges its OIDC token for short-lived Azure credentials, deploys the packaged Java Function, and invokes the VM's locked deployment command. The VM fetches the exact CI revision, builds the Spring services and React application, reconciles the Compose topology, and runs the local CDC smoke test before the workflow tests the public API, UI assets, and Kafka-to-Cosmos projection over HTTPS.
+`.github/workflows/deploy-azure.yml` runs after successful `main` CI or by manual dispatch for a selected branch. GitHub exchanges its OIDC token for short-lived Azure credentials and deploys the exact checked-out commit. The Function package is updated first. Azure Run Command then installs or reconciles the pinned K3s version, preserves the Compose platform, builds application images from that commit, imports them into containerd, applies the Kustomize overlay, waits for every rollout, retires the superseded Compose application containers, registers both Debezium connectors idempotently, and runs the saga smoke test through a gateway port-forward.
 
-Verify manually after provisioning:
+The workflow independently verifies that every Kubernetes application image uses the expected commit SHA, all Deployments are available, Eureka is absent, and the public saga, UI, HTTPS, and Kafka-to-Cosmos paths work. A successful workflow therefore proves the selected Git revision, the cluster rollout, and the externally observable behavior together.
+
+Verify the public flow manually:
 
 ```bash
 PUBLIC_API_URL="$(terraform -chdir=infra/azure output -raw public_api_url)"
 GATEWAY_URL="$PUBLIC_API_URL" VERIFY_PLATFORM=false ./scripts/smoke-test.sh
+UI_URL="$PUBLIC_API_URL" ./scripts/ui-smoke-test.sh
+GATEWAY_URL="$PUBLIC_API_URL" ./scripts/serverless-smoke-test.sh
 ```
 
-Use Azure Run Command for the multi-replica failover check:
+Inspect Kubernetes rollout and image identity through Azure Run Command:
 
 ```bash
 az vm run-command invoke \
   --resource-group "$(terraform -chdir=infra/azure output -raw resource_group_name)" \
   --name "$(terraform -chdir=infra/azure output -raw vm_name)" \
   --command-id RunShellScript \
-  --scripts 'cd /opt/event-sourced-cqrs && sudo ./scripts/scaling-test.sh'
+  --scripts 'sudo k3s kubectl --namespace cqrs-orders get deployments,pods,services -o wide'
+```
+
+Exercise replica replacement without relying on Eureka:
+
+```bash
+az vm run-command invoke \
+  --resource-group "$(terraform -chdir=infra/azure output -raw resource_group_name)" \
+  --name "$(terraform -chdir=infra/azure output -raw vm_name)" \
+  --command-id RunShellScript \
+  --scripts 'pod=$(sudo k3s kubectl --namespace cqrs-orders get pod -l app.kubernetes.io/name=order-command-service -o jsonpath="{.items[0].metadata.name}"); sudo k3s kubectl --namespace cqrs-orders delete pod "$pod"; sudo k3s kubectl --namespace cqrs-orders rollout status deployment/order-command-service --timeout=180s'
 ```
 
 Both connectors must report one `RUNNING` connector and one `RUNNING` task:
@@ -120,7 +147,7 @@ az vm run-command invoke \
   --resource-group "$(terraform -chdir=infra/azure output -raw resource_group_name)" \
   --name "$(terraform -chdir=infra/azure output -raw vm_name)" \
   --command-id RunShellScript \
-  --scripts 'for name in order-events inventory-events; do curl --fail --silent "http://localhost:8083/connectors/${name}/status"; done'
+  --scripts 'for name in order-events inventory-events; do curl --fail --silent "http://10.42.1.4:8083/connectors/${name}/status"; done'
 ```
 
 ## Operations
@@ -131,14 +158,14 @@ az vm run-command invoke \
   gh variable set AZURE_DEPLOY_ENABLED --repo karacsonybarni/event-sourced-cqrs-microservices --body false
   ```
 
-- Inspect bootstrap and deployment state:
+- Inspect bootstrap, cluster, platform, and deployment state:
 
   ```bash
   az vm run-command invoke \
     --resource-group "$(terraform -chdir=infra/azure output -raw resource_group_name)" \
     --name "$(terraform -chdir=infra/azure output -raw vm_name)" \
     --command-id RunShellScript \
-    --scripts 'sudo cloud-init status --long; sudo systemctl status event-sourced-cqrs --no-pager'
+    --scripts 'sudo cloud-init status --long; sudo systemctl status event-sourced-cqrs k3s --no-pager; sudo k3s kubectl --namespace cqrs-orders get pods,services; sudo docker compose -f /opt/event-sourced-cqrs/compose.yml -f /opt/event-sourced-cqrs/compose.azure.yml -f /opt/event-sourced-cqrs/compose.kubernetes-platform.yml ps'
   ```
 
 - Stop compute billing while retaining the VM and disk:

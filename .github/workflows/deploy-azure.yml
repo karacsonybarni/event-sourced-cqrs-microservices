@@ -35,6 +35,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            validated_run_count="$(gh api \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${DEPLOY_REVISION}&status=success&per_page=100" \
+              --jq '[.workflow_runs[] | select(.name == "CI")] | length')"
+            if [[ "${validated_run_count}" -lt 1 ]]; then
+              printf 'Revision %s has no successful exact-SHA CI run.\n' "${DEPLOY_REVISION}" >&2
+              exit 1
+            fi
             printf 'Deploying manually selected revision %s.\n' "${DEPLOY_REVISION}"
             echo "revision=${DEPLOY_REVISION}" >> "${GITHUB_OUTPUT}"
             echo "deploy=true" >> "${GITHUB_OUTPUT}"
@@ -235,7 +243,7 @@ jobs:
           jq -e '
             any(.[]; .name == "function:projectOrderActivity" and .instanceCount == 1)
           ' <<<"${always_ready}" >/dev/null
-      - name: Deploy through Azure Run Command
+      - name: Deploy the Kubernetes application tier through Azure Run Command
         id: runtime
         if: steps.freshness.outputs.deploy == 'true'
         env:
@@ -257,6 +265,47 @@ jobs:
           fi
           echo "public_api_url=${public_api_url}" >> "${GITHUB_OUTPUT}"
           grep --quiet '^AZURE_DEPLOYMENT_SUCCEEDED$' <<<"${deployment_output}"
+      - name: Verify the exact Kubernetes rollout
+        if: steps.freshness.outputs.deploy == 'true'
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          VM_NAME: ${{ vars.AZURE_VM_NAME }}
+        run: |
+          remote_verification="$(cat <<REMOTE_SCRIPT
+          set -eu
+          expected_revision='${DEPLOY_REVISION}'
+          for deployment in order-command-service order-query-service inventory-service api-gateway frontend; do
+            image="\$(sudo k3s kubectl --namespace cqrs-orders get "deployment/\${deployment}" --output jsonpath='{.spec.template.spec.containers[0].image}')"
+            case "\${image}" in
+              *:"\${expected_revision}") ;;
+              *)
+                printf 'Deployment %s uses unexpected image %s.\n' "\${deployment}" "\${image}" >&2
+                exit 1
+                ;;
+            esac
+          done
+          edge_revision="$(sudo k3s kubectl --namespace cqrs-orders get deployment/edge-proxy --output jsonpath='{.spec.template.metadata.annotations.event-sourced-cqrs/deployment-revision}')"
+          if [[ "${edge_revision}" != "${expected_revision}" ]]; then
+            printf 'Edge deployment uses unexpected revision %s.\n' "${edge_revision}" >&2
+            exit 1
+          fi
+          sudo k3s kubectl --namespace cqrs-orders wait --for=condition=Available deployment --all --timeout=180s
+          if sudo k3s kubectl --namespace cqrs-orders get deployment discovery-server >/dev/null 2>&1; then
+            echo 'Eureka must not run in the Kubernetes application tier.' >&2
+            exit 1
+          fi
+          printf 'KUBERNETES_DEPLOYMENT_VERIFIED\n'
+          REMOTE_SCRIPT
+          )"
+          verification_output="$(az vm run-command invoke \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${VM_NAME}" \
+            --command-id RunShellScript \
+            --scripts "${remote_verification}" \
+            --query 'value[].message' \
+            --output tsv)"
+          printf '%s\n' "${verification_output}"
+          grep --quiet '^KUBERNETES_DEPLOYMENT_VERIFIED$' <<<"${verification_output}"
       - name: Verify the public event-sourced CQRS flow
         if: steps.freshness.outputs.deploy == 'true'
         env:

@@ -56,7 +56,7 @@ run "cost_controlled_cloud_topology" {
 
   assert {
     condition     = azurerm_linux_virtual_machine.runtime.size == "Standard_B2as_v2"
-    error_message = "The runtime VM must retain the tested two-vCPU/eight-GiB capacity."
+    error_message = "The runtime VM must retain the tested two-vCPU/eight-GiB K3s and platform capacity."
   }
 
   assert {
@@ -71,7 +71,7 @@ run "cost_controlled_cloud_topology" {
 
   assert {
     condition     = azurerm_linux_virtual_machine.runtime.os_disk[0].disk_size_gb == 64
-    error_message = "The deployment host must retain enough disk space for builds and stateful containers."
+    error_message = "The deployment host must retain enough disk space for builds, K3s, images, and stateful platform containers."
   }
 
   assert {

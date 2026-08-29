@@ -7,12 +7,12 @@ spring:
         webflux:
           routes:
             - id: order-commands
-              uri: lb://order-command-service
+              uri: ${ORDER_COMMAND_URI:lb://order-command-service}
               predicates:
                 - Path=/api/orders/**
                 - Method=POST,PUT,DELETE
             - id: order-queries
-              uri: lb://order-query-service
+              uri: ${ORDER_QUERY_URI:lb://order-query-service}
               predicates:
                 - Path=/api/orders/**
                 - Method=GET

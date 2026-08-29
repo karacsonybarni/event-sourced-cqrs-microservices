@@ -1,0 +1,20 @@
+services:
+  command-db:
+    ports: !override
+      - "${PLATFORM_HOST:?Set PLATFORM_HOST}:5433:5432"
+
+  query-db:
+    ports: !override
+      - "${PLATFORM_HOST:?Set PLATFORM_HOST}:5434:5432"
+
+  inventory-db:
+    ports: !override
+      - "${PLATFORM_HOST:?Set PLATFORM_HOST}:5435:5432"
+
+  kafka:
+    ports: !override
+      - "${PLATFORM_HOST:?Set PLATFORM_HOST}:9094:9094"
+
+  debezium:
+    ports: !override
+      - "${PLATFORM_HOST:?Set PLATFORM_HOST}:8083:8083"

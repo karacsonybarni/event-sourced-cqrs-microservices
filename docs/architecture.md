@@ -19,7 +19,7 @@ sequenceDiagram
     autonumber
     actor Client as React portal / API client
     participant G as API Gateway
-    participant R as Eureka Registry
+    participant R as Local Eureka Registry
     participant C as Command Service
     participant ES as Command DB / Event Store
     participant D as Debezium
@@ -156,7 +156,7 @@ The cloud artifacts map the common service models to concrete ownership boundari
 
 | Model | Project example | Current state | Responsibility boundary |
 | --- | --- | --- | --- |
-| IaaS | Azure Linux VM, virtual network, network interface, and managed disk | Public runtime | Azure operates physical infrastructure; the project operates the guest OS, Docker, and services |
+| IaaS | Azure Linux VM, virtual network, network interface, and managed disk | Public runtime | Azure operates physical infrastructure; the project operates the guest OS, K3s, Docker, and services |
 | PaaS / FaaS | Azure Blob Storage for Terraform state | Active deployment foundation | Azure operates the storage platform and durability mechanisms |
 | PaaS / FaaS | Azure Functions and Azure Cosmos DB for NoSQL | Active independent projection | Azure operates the service runtime, scaling mechanism, patching, and document platform |
 | SaaS | GitHub repository and GitHub Actions | Active source-control and delivery platform | The project consumes source-control and CI/CD capabilities as hosted software |
@@ -165,13 +165,13 @@ Azure Functions is the Azure equivalent of the event-driven compute model associ
 
 ## Server-side discovery and horizontal scaling
 
-External clients know only the gateway's stable address. Command, Inventory, and query instances self-register with Eureka and renew short-lived leases. The gateway resolves the command and query APIs through Spring Cloud LoadBalancer; Inventory has no public route and participates only through Kafka.
+External clients know only the gateway's stable address. Discovery is deployment-specific. In local Compose, Command, Inventory, and query instances self-register with Eureka and renew short-lived leases; the gateway resolves the command and query APIs through Spring Cloud LoadBalancer. In Azure K3s, the application pods disable Eureka, Kubernetes Services and EndpointSlices own discovery, and the gateway routes directly to the command and query Service DNS names. Inventory has no public route and participates only through Kafka in both environments.
 
-The default Compose topology runs two command replicas and two query replicas. Backend host ports are assigned dynamically to avoid collisions; service traffic uses the private Compose network and discovered instance addresses. The scaling acceptance test stops each replica in turn, waits until Eureka removes it, and verifies that the gateway continues serving traffic through its peer.
+The default Compose topology and Azure Kubernetes application tier each run two command replicas and two query replicas. Compose assigns backend host ports dynamically and verifies failover after Eureka lease eviction. Kubernetes uses declarative replica ownership, readiness probes, rolling updates, and stable Services; deleting one pod demonstrates replacement and continued routing without a registry lease interval.
 
 Command replicas are stateless. PostgreSQL owns client idempotency claims, aggregate stream locks, expected versions, and the atomic event append. Query replicas share one Kafka consumer group, so partitions are assigned across the active consumers; the aggregate ID remains the Kafka key, preserving per-stream order. Every query replica reads the same query database, while the processed-event table and aggregate version make redelivery idempotent.
 
-The local registry uses short lease and eviction intervals and disables Eureka self-preservation so failover is deterministic and observable. A production deployment should run a highly available registry with self-preservation enabled, or replace Eureka with the deployment platform's native service registry and load balancer.
+The local registry uses short lease and eviction intervals and disables Eureka self-preservation so failover is deterministic and observable. Azure already follows the production direction of replacing application-level discovery with the deployment platform's native registry and load balancer. Its one-node K3s placement still does not provide infrastructure high availability.
 
 ## Event contract
 
@@ -230,13 +230,13 @@ The first saga rollout does not use Kafka retention as a migration boundary. Dep
 | Idempotency key reused with another payload | Stored fingerprint differs | Return `409 Conflict` without another event |
 | Concurrent cancellation retries | Metadata-row lock serializes replay and append | Only the first transition appends cancellation at the next version |
 | Attempted event update or delete | Database trigger aborts the statement | Correct with a compensating event, never history mutation |
-| One command or query replica stops | Eureka lease expires and the gateway refreshes its instance list | Traffic continues through the surviving replica |
+| One command or query replica stops | Compose waits for Eureka lease expiry; Kubernetes removes an unready endpoint and replaces the pod | Traffic continues through the surviving replica |
 | Registry unavailable after clients have cached instances | Existing cache can serve temporarily; topology changes are not discovered | Restore the registry; run it redundantly outside local development |
 | Activity Function or Cosmos DB unavailable | The primary command and query paths continue; the affected activity partition pauses | The Kafka consumer group retries with exponential backoff until recovery; deterministic document IDs absorb redelivery |
 
 ## Cloud deployments and production path
 
-The credit-protected Azure environment also packages the complete topology onto one encrypted two-vCPU/eight-GiB VM. Inventory adds one PostgreSQL process and one Spring service, so the economical deployment uses explicit 256 MiB and 512 MiB container ceilings for them. This is a demonstration topology with constrained headroom, not a production capacity recommendation. It also adds a stable Azure DNS name, Caddy-managed HTTPS, private versioned Blob state, an Entra workload identity federated to GitHub Actions, Azure Run Command, boot diagnostics, and an explicit budget. Provisioning is allowed only while the Azure subscription is enabled with its spending limit set to `On`. See [Azure cloud deployment](azure-deployment.md) and [ADR-004](adr/004-credit-protected-azure-deployment.md).
+The credit-protected Azure environment packages the complete topology onto one encrypted two-vCPU/eight-GiB VM while separating orchestration by responsibility. K3s owns the stateless application tier; Docker Compose retains PostgreSQL, Kafka, and Debezium so existing data and connector offsets cross the migration unchanged. Immutable commit-tagged images, Kustomize, health probes, resource policy, secret/config projection, ingress NetworkPolicies, persistent Caddy certificate storage, and exact-revision rollout checks make the orchestration behavior observable. The economical placement has constrained headroom and one failure domain, so it is not a production capacity or availability recommendation. Azure also adds stable DNS, Caddy-managed HTTPS, private versioned Blob state, an Entra workload identity federated to GitHub Actions, Azure Run Command, boot diagnostics, and an explicit budget. Provisioning is allowed only while the Azure subscription is enabled with its spending limit set to `On`. See [Azure cloud deployment](azure-deployment.md), [ADR-004](adr/004-credit-protected-azure-deployment.md), and [ADR-007](adr/007-incremental-kubernetes-application-tier.md).
 
 The cost-optimized AWS environment packages the complete topology onto one encrypted EC2 host, places an API Gateway HTTP API at the public boundary, and uses Terraform, S3 remote state, GitHub OIDC, Systems Manager, CloudWatch, and explicit budgets for repeatable operations. Container memory limits reflect the measured runtime footprint, internal ports remain private, and the management endpoint is separated from public gateway traffic. See [AWS cloud deployment](aws-deployment.md) and [ADR-003](adr/003-cost-optimized-aws-deployment.md).
 

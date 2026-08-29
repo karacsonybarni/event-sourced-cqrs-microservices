@@ -7,7 +7,7 @@
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk)](https://adoptium.net/)
 [![Debezium](https://img.shields.io/badge/Debezium-3.6.1.Final-2C4F7C)](https://debezium.io/)
 
-A runnable reference architecture combining a React customer portal, Command Query Responsibility Segregation (CQRS), selective event sourcing, a choreographed Order–Inventory saga, Debezium change data capture, registry-backed service discovery, and horizontal scaling. Order and inventory-reservation lifecycles are immutable event streams, Debezium publishes committed inserts to Kafka, and replicated query services build and serve a disposable read model.
+A runnable reference architecture combining a React customer portal, Command Query Responsibility Segregation (CQRS), selective event sourcing, a choreographed Order–Inventory saga, Debezium change data capture, horizontal scaling, and a Kubernetes-managed Azure application tier. Order and inventory-reservation lifecycles are immutable event streams, Debezium publishes committed inserts to Kafka, and replicated query services build and serve a disposable read model.
 
 The design follows the pattern language at [microservices.io](https://microservices.io/patterns/microservices.html), especially [Event Sourcing](https://microservices.io/patterns/data/event-sourcing.html), [Saga](https://microservices.io/patterns/data/saga.html), [CQRS](https://microservices.io/patterns/data/cqrs.html), [Database per Service](https://microservices.io/patterns/data/database-per-service.html), [API Gateway](https://microservices.io/patterns/apigateway.html), and [Idempotent Consumer](https://microservices.io/patterns/communication-style/idempotent-consumer.html).
 
@@ -18,13 +18,13 @@ flowchart LR
     Client([Browser / API client]) --> Frontend[React<br/>Order Portal]
     Frontend -->|same-origin /api| Gateway[Spring Cloud<br/>API Gateway]
     Frontend -. same-origin /serverless .-> ActivityFunction
-    Registry[Eureka<br/>Service Registry]
-    Gateway <-->|discover instances| Registry
-    Command[Order Command Service<br/>2 replicas] -->|self-register| Registry
-    Inventory[Inventory Service] -->|self-register| Registry
-    Query[Order Query Service<br/>2 replicas] -->|self-register| Registry
-    Gateway -->|lb:// POST / PUT| Command
-    Gateway -->|lb:// GET| Query
+    Discovery[Local: Eureka registry<br/>Azure: Kubernetes Services]
+    Gateway <-->|resolve application instances| Discovery
+    Command[Order Command Service<br/>2 replicas] --> Discovery
+    Inventory[Inventory Service] --> Discovery
+    Query[Order Query Service<br/>2 replicas] --> Discovery
+    Gateway -->|POST / PUT| Command
+    Gateway -->|GET| Query
 
     Command -->|append in one ACID transaction| EventStore[(Command PostgreSQL<br/>append-only event store)]
     EventStore -->|logical replication / WAL| Debezium[Debezium<br/>PostgreSQL connector]
@@ -45,7 +45,7 @@ flowchart LR
 | --- | --- | --- |
 | `frontend` | Customer order workflow and live architecture proof | None |
 | `api-gateway` | Method-aware routing and correlation IDs | None |
-| `discovery-server` | Instance registry and health-aware service lookup | Registry leases |
+| `discovery-server` | Local Compose registry and health-aware service lookup; replaced by Kubernetes Services on Azure | Local registry leases |
 | `order-command-service` | Validates commands, replays aggregates, appends events | Event streams and command deduplication |
 | `inventory-service` | Reserves stock, rejects unavailable orders, and compensates cancellation | Transactional stock plus event-sourced reservation streams |
 | Debezium | Captures committed event inserts from PostgreSQL WAL | Replication offset and connector state |
@@ -89,11 +89,11 @@ make down
 
 ## Deploy to Azure
 
-The repository includes a credit-protected Azure deployment with Terraform, Azure Virtual Network, a hardened Linux VM, Azure Functions Flex Consumption, Cosmos DB for NoSQL, private storage endpoints and DNS, private versioned Blob state, managed identities, GitHub Actions OIDC, Azure Run Command, boot diagnostics, a resource-group budget, stable DNS, and Caddy-managed HTTPS. It preserves the complete multi-replica Kafka and Debezium topology and refuses to provision unless the Azure subscription is enabled with spending protection set to `On`.
+The repository includes a credit-protected Azure deployment with Terraform, Azure Virtual Network, a hardened Linux VM, a checksum-verified K3s cluster, Azure Functions Flex Consumption, Cosmos DB for NoSQL, private storage endpoints and DNS, private versioned Blob state, managed identities, GitHub Actions OIDC, Azure Run Command, boot diagnostics, a resource-group budget, stable DNS, and Caddy-managed HTTPS. Kubernetes owns the stateless application tier and replaces Eureka with Services and DNS on Azure; Compose retains PostgreSQL, Kafka, and Debezium so the migration preserves durable state and connector offsets. Provisioning still refuses to proceed unless the Azure subscription is enabled with spending protection set to `On`.
 
 Live React order portal and public API: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
 
-See [Azure cloud deployment](docs/azure-deployment.md) for the architecture, provisioning command, security model, cost boundary, delivery flow, operations, and teardown procedure. [ADR-004](docs/adr/004-credit-protected-azure-deployment.md) records why the complete topology uses promotional credit on one 8-GiB VM instead of the undersized 12-month free VM shapes.
+See [Azure cloud deployment](docs/azure-deployment.md) for the architecture, provisioning command, Kubernetes boundary, security model, cost boundary, delivery flow, operations, and teardown procedure. [ADR-004](docs/adr/004-credit-protected-azure-deployment.md) records why the complete topology uses promotional credit on one 8-GiB VM instead of the undersized 12-month free VM shapes; [ADR-007](docs/adr/007-incremental-kubernetes-application-tier.md) records the incremental Kubernetes migration and its production boundary.
 
 ## Preserved AWS deployment
 
@@ -166,6 +166,7 @@ See [Architecture](docs/architecture.md), [ADR-001](docs/adr/001-event-sourcing-
 ```bash
 ./mvnw clean verify
 docker compose config --quiet
+make kubernetes-validate
 make up
 make smoke
 make scale-smoke
@@ -187,7 +188,7 @@ The test suite covers both aggregate lifecycles, versioned serialization, append
 - Azure Cosmos DB for NoSQL document projection
 - springdoc-openapi 3.1.0
 - Micrometer Actuator and Prometheus metrics
-- Maven Wrapper, Docker Compose, GitHub Actions, Dependabot
+- Kubernetes 1.36 through K3s, Kustomize, Docker Compose, GitHub Actions, Dependabot
 - Terraform, Azure Virtual Network, Linux VM, Entra workload identity federation, Run Command, Blob state, budgets, DNS, and HTTPS
 - Terraform, AWS API Gateway, EC2, VPC, IAM, Systems Manager, CloudWatch, and S3 remote state
 
@@ -206,9 +207,11 @@ docs/                    architecture narrative and decisions
 scripts/                 end-to-end and multi-replica failover checks
 infra/aws/               Terraform state bootstrap and AWS runtime infrastructure
 infra/azure/             Terraform state bootstrap and Azure runtime infrastructure
+deploy/kubernetes/       Kubernetes base resources and Azure Kustomize overlay
 compose.yml              complete local platform
 compose.cloud.yml        cloud-only exposure, resource, secret, and logging policy
 compose.azure.yml        Azure exposure, resource, secret, logging, and HTTPS policy
+compose.kubernetes-platform.yml private host bindings for retained Azure platform services
 ```
 
 ## License

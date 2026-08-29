@@ -1,0 +1,38 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: escqrs/order-command-service
+    newTag: IMAGE_TAG
+  - name: escqrs/order-query-service
+    newTag: IMAGE_TAG
+  - name: escqrs/inventory-service
+    newTag: IMAGE_TAG
+  - name: escqrs/api-gateway
+    newTag: IMAGE_TAG
+  - name: escqrs/frontend
+    newTag: IMAGE_TAG
+patches:
+  - target:
+      group: discovery.k8s.io
+      version: v1
+      kind: EndpointSlice
+    patch: |-
+      - op: replace
+        path: /endpoints/0/addresses/0
+        value: 10.42.1.4
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: edge-proxy
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations
+        value:
+          event-sourced-cqrs/deployment-revision: DEPLOYMENT_REVISION
+labels:
+  - pairs:
+      app.kubernetes.io/environment: azure
+    includeSelectors: false

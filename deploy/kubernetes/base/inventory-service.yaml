@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-service
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: inventory-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: inventory-service
+        app.kubernetes.io/component: saga-participant
+    spec:
+      serviceAccountName: runtime
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: application
+          image: escqrs/inventory-service:development
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef:
+                name: application-config
+          env:
+            - name: DATABASE_URL
+              value: jdbc:postgresql://inventory-db:5432/inventory
+            - name: DATABASE_USERNAME
+              value: inventory
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: runtime-secrets
+                  key: inventory-db-password
+            - name: SAGA_ACTIVATION_AT
+              valueFrom:
+                secretKeyRef:
+                  name: runtime-secrets
+                  key: saga-activation-at
+          ports:
+            - name: http
+              containerPort: 8084
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 320Mi
+            limits:
+              cpu: 750m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+          volumeMounts:
+            - name: temporary-files
+              mountPath: /tmp
+      volumes:
+        - name: temporary-files
+          emptyDir:
+            sizeLimit: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-service
+spec:
+  selector:
+    app.kubernetes.io/name: inventory-service
+  ports:
+    - name: http
+      port: 8084
+      targetPort: http
