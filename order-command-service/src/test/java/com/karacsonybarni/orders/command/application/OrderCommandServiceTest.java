@@ -89,7 +89,7 @@ class OrderCommandServiceTest {
         assertThat(result.orderId()).isEqualTo(orderId);
         assertThat(result.replayed()).isTrue();
         verify(eventStore, never()).create(any());
-        verify(eventStore, never()).append(any());
+        verify(eventStore, never()).update(any(), any());
     }
 
     @Test
@@ -108,6 +108,6 @@ class OrderCommandServiceTest {
 
         verify(eventStore, never()).load(any());
         verify(eventStore, never()).create(any());
-        verify(eventStore, never()).append(any());
+        verify(eventStore, never()).update(any(), any());
     }
 }
