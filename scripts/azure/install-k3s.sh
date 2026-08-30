@@ -10,6 +10,21 @@ installer="${download_directory}/install-k3s.sh"
 desired_config="${download_directory}/config.yaml"
 config_changed="false"
 
+wait_for_local_path_provisioner() {
+  for _ in {1..60}; do
+    if k3s kubectl --namespace kube-system get \
+      deployment/local-path-provisioner >/dev/null 2>&1; then
+      k3s kubectl --namespace kube-system rollout status \
+        deployment/local-path-provisioner \
+        --timeout=180s
+      return
+    fi
+    sleep 2
+  done
+  echo "K3s did not create the local-path-provisioner deployment in time." >&2
+  return 1
+}
+
 printf '%s\n' \
   'disable:' \
   '  - traefik' \
@@ -35,6 +50,7 @@ if command -v k3s >/dev/null && k3s --version | grep --fixed-strings --quiet "${
     systemctl start k3s
   fi
   k3s kubectl wait --for=condition=Ready node --all --timeout=180s
+  wait_for_local_path_provisioner
   exit 0
 fi
 
@@ -47,3 +63,4 @@ INSTALL_K3S_VERSION="${k3s_version}" sh "${installer}"
 
 systemctl enable --now k3s
 k3s kubectl wait --for=condition=Ready node --all --timeout=180s
+wait_for_local_path_provisioner

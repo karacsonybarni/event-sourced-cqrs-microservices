@@ -66,6 +66,7 @@ render_directory="$(mktemp -d)"
 port_forward_log="$(mktemp)"
 deployment_backup="$(mktemp)"
 runtime_config_backup="$(mktemp)"
+failure_diagnostics="$(mktemp)"
 port_forward_pid=""
 cluster_existed="false"
 platform_mutated="false"
@@ -131,11 +132,16 @@ cleanup() {
       fi
     fi
   fi
+  if [[ -s "${failure_diagnostics}" ]]; then
+    printf '\nKubernetes deployment failure diagnostics:\n' >&2
+    cat "${failure_diagnostics}" >&2
+  fi
   rm -f \
     "${image_archive}" \
     "${port_forward_log}" \
     "${deployment_backup}" \
-    "${runtime_config_backup}"
+    "${runtime_config_backup}" \
+    "${failure_diagnostics}"
   rm -rf "${render_directory}"
 }
 trap cleanup EXIT
@@ -209,6 +215,7 @@ application_images=(
   "escqrs/api-gateway:${deployment_revision}"
   "escqrs/frontend:${deployment_revision}"
 )
+edge_proxy_image="caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"
 
 retained_application_image() {
   local candidate="${1#docker.io/}"
@@ -254,6 +261,8 @@ docker build \
 
 docker save --output "${image_archive}" "${application_images[@]}"
 k3s ctr images import "${image_archive}"
+k3s ctr images pull "docker.io/library/${edge_proxy_image}"
+k3s ctr images inspect "docker.io/library/${edge_proxy_image}" >/dev/null
 
 runtime_config_revision="$(
   {
@@ -317,9 +326,26 @@ for deployment in \
   api-gateway \
   frontend \
   edge-proxy; do
-  k3s kubectl --namespace "${namespace}" rollout status \
+  if ! k3s kubectl --namespace "${namespace}" rollout status \
     "deployment/${deployment}" \
-    --timeout=300s
+    --timeout=300s; then
+    {
+      printf 'Rollout failed for deployment/%s.\n' "${deployment}"
+      k3s kubectl --namespace "${namespace}" get \
+        pods,services,persistentvolumeclaims \
+        --output=wide || true
+      k3s kubectl --namespace "${namespace}" describe "deployment/${deployment}" || true
+      k3s kubectl --namespace "${namespace}" describe pods \
+        --selector "app.kubernetes.io/name=${deployment}" || true
+      k3s kubectl --namespace "${namespace}" logs \
+        --selector "app.kubernetes.io/name=${deployment}" \
+        --all-containers \
+        --tail=100 || true
+      k3s kubectl --namespace "${namespace}" get events \
+        --sort-by=.lastTimestamp || true
+    } >"${failure_diagnostics}" 2>&1
+    exit 1
+  fi
 done
 
 "${compose[@]}" rm --force \
