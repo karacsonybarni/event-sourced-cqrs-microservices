@@ -23,6 +23,8 @@
     <module>api-gateway</module>
     <module>order-command-service</module>
     <module>inventory-service</module>
+    <module>order-query-model</module>
+    <module>order-projection-worker</module>
     <module>order-query-service</module>
     <module>order-activity-function</module>
   </modules>
