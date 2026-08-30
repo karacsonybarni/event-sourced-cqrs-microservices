@@ -40,7 +40,7 @@ cloud-destroy:
 	./scripts/aws/destroy-runtime.sh
 
 logs:
-	docker compose --profile ui logs -f frontend discovery-server api-gateway order-command-service inventory-service order-query-service debezium
+	docker compose --profile ui logs -f frontend discovery-server api-gateway order-command-service inventory-service order-projection-worker order-query-service debezium
 
 clean:
 	./mvnw clean
