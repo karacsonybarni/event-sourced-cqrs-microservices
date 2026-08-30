@@ -5,6 +5,8 @@ resources:
 images:
   - name: escqrs/order-command-service
     newTag: IMAGE_TAG
+  - name: escqrs/order-projection-worker
+    newTag: IMAGE_TAG
   - name: escqrs/order-query-service
     newTag: IMAGE_TAG
   - name: escqrs/inventory-service
