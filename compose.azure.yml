@@ -65,12 +65,20 @@ services:
     mem_limit: 640m
     logging: *azure_logging
 
+  order-projection-worker:
+    ports: !reset []
+    environment:
+      DATABASE_PASSWORD: "${QUERY_DB_PASSWORD:?Set QUERY_DB_PASSWORD}"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=70.0 -XX:+UseG1GC"
+    mem_limit: 512m
+    logging: *azure_logging
+
   order-query-service:
     ports: !reset []
     environment:
       DATABASE_PASSWORD: "${QUERY_DB_PASSWORD:?Set QUERY_DB_PASSWORD}"
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=70.0 -XX:+UseG1GC"
-    mem_limit: 640m
+    mem_limit: 512m
     logging: *azure_logging
 
   inventory-service:

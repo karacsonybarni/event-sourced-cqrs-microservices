@@ -92,7 +92,7 @@ cleanup() {
         --scale order-command-service=2 \
         --scale order-query-service=2 \
         command-db query-db inventory-db kafka kafka-init debezium \
-        discovery-server order-command-service order-query-service \
+        discovery-server order-command-service order-projection-worker order-query-service \
         inventory-service api-gateway frontend edge-proxy
     else
       if [[ "${runtime_config_mutated}" == "true" && -s "${runtime_config_backup}" ]]; then
@@ -116,6 +116,7 @@ cleanup() {
           --filename "${deployment_backup}"
         for deployment in \
           order-command-service \
+          order-projection-worker \
           order-query-service \
           inventory-service \
           api-gateway \
@@ -203,13 +204,14 @@ if [[ "${cluster_existed}" != "true" ]]; then
   # before Maven and image builds run alongside the K3s control plane.
   "${compose[@]}" stop \
     edge-proxy frontend api-gateway order-command-service \
-    order-query-service inventory-service discovery-server
+    order-projection-worker order-query-service inventory-service discovery-server
 fi
 
 ./mvnw --batch-mode --no-transfer-progress -DskipTests package
 
 application_images=(
   "escqrs/order-command-service:${deployment_revision}"
+  "escqrs/order-projection-worker:${deployment_revision}"
   "escqrs/order-query-service:${deployment_revision}"
   "escqrs/inventory-service:${deployment_revision}"
   "escqrs/api-gateway:${deployment_revision}"
@@ -229,7 +231,7 @@ retained_application_image() {
 }
 
 prune_application_images() {
-  local application_image_pattern='^escqrs/(order-command-service|order-query-service|inventory-service|api-gateway|frontend):[0-9a-f]{40}$'
+  local application_image_pattern='^escqrs/(order-command-service|order-projection-worker|order-query-service|inventory-service|api-gateway|frontend):[0-9a-f]{40}$'
   local image
   local normalized_image
 
@@ -251,14 +253,14 @@ prune_application_images() {
 }
 
 docker build --tag "${application_images[0]}" --file order-command-service/Dockerfile .
-docker build --tag "${application_images[1]}" --file order-query-service/Dockerfile .
-docker build --tag "${application_images[2]}" --file inventory-service/Dockerfile .
-docker build --tag "${application_images[3]}" --file api-gateway/Dockerfile .
+docker build --tag "${application_images[1]}" --file order-projection-worker/Dockerfile .
+docker build --tag "${application_images[2]}" --file order-query-service/Dockerfile .
+docker build --tag "${application_images[3]}" --file inventory-service/Dockerfile .
+docker build --tag "${application_images[4]}" --file api-gateway/Dockerfile .
 docker build \
   --build-arg VITE_SERVERLESS_PROJECTION_ENABLED=true \
-  --tag "${application_images[4]}" \
+  --tag "${application_images[5]}" \
   frontend
-
 docker save --output "${image_archive}" "${application_images[@]}"
 k3s ctr images import "${image_archive}"
 k3s ctr images pull "docker.io/library/${edge_proxy_image}"
@@ -321,6 +323,7 @@ k3s kubectl apply \
 
 for deployment in \
   order-command-service \
+  order-projection-worker \
   order-query-service \
   inventory-service \
   api-gateway \
@@ -350,7 +353,7 @@ done
 
 "${compose[@]}" rm --force \
   edge-proxy frontend api-gateway order-command-service \
-  order-query-service inventory-service discovery-server || true
+  order-projection-worker order-query-service inventory-service discovery-server || true
 
 for attempt in {1..30}; do
   if curl --fail --silent --show-error "http://127.0.0.1" >/dev/null; then

@@ -7,7 +7,7 @@
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk)](https://adoptium.net/)
 [![Debezium](https://img.shields.io/badge/Debezium-3.6.1.Final-2C4F7C)](https://debezium.io/)
 
-A runnable reference architecture combining a React customer portal, Command Query Responsibility Segregation (CQRS), selective event sourcing, a choreographed Order–Inventory saga, Debezium change data capture, horizontal scaling, and a Kubernetes-managed Azure application tier. Order and inventory-reservation lifecycles are immutable event streams, Debezium publishes committed inserts to Kafka, and replicated query services build and serve a disposable read model.
+A runnable reference architecture combining a React customer portal, Command Query Responsibility Segregation (CQRS), selective event sourcing, a choreographed Order–Inventory saga, Debezium change data capture, horizontal scaling, and a Kubernetes-managed Azure application tier. Order and inventory-reservation lifecycles are immutable event streams, Debezium publishes committed inserts to Kafka, an independently deployable projection worker builds the disposable read model, and replicated query services serve it.
 
 The design follows the pattern language at [microservices.io](https://microservices.io/patterns/microservices.html), especially [Event Sourcing](https://microservices.io/patterns/data/event-sourcing.html), [Saga](https://microservices.io/patterns/data/saga.html), [CQRS](https://microservices.io/patterns/data/cqrs.html), [Database per Service](https://microservices.io/patterns/data/database-per-service.html), [API Gateway](https://microservices.io/patterns/apigateway.html), and [Idempotent Consumer](https://microservices.io/patterns/communication-style/idempotent-consumer.html).
 
@@ -33,7 +33,7 @@ flowchart LR
     Inventory -->|lock and adjust| InventoryDB[(Inventory PostgreSQL<br/>stock + reservation events)]
     InventoryDB -->|logical replication / WAL| Debezium
     Kafka -->|InventoryReserved / Rejected| Command
-    Kafka -->|at-least-once| Projector[Idempotent projector]
+    Kafka -->|at-least-once| Projector[Order Projection Worker<br/>independent Kafka consumer]
     Projector --> QueryDB[(Query PostgreSQL<br/>denormalized views)]
     Query --> QueryDB
     Kafka -. independent projection .-> ActivityFunction[Azure Function<br/>scale-to-zero consumer]
@@ -49,11 +49,12 @@ flowchart LR
 | `order-command-service` | Validates commands, replays aggregates, appends events | Event streams and command deduplication |
 | `inventory-service` | Reserves stock, rejects unavailable orders, and compensates cancellation | Transactional stock plus event-sourced reservation streams |
 | Debezium | Captures committed event inserts from PostgreSQL WAL | Replication offset and connector state |
-| `order-query-service` | Projects events and serves query-optimized responses | Order read model and processed-event IDs |
+| `order-projection-worker` | Consumes order events and transactionally materializes the relational CQRS read model | Write path to order read model and processed-event IDs |
+| `order-query-service` | Serves read-only query-optimized responses | Read-only access to the order read model |
 | `order-activity-function` | Builds an independently scalable activity timeline | Cosmos DB documents keyed by event and partitioned by order |
 | Kafka | Durable asynchronous transport | Order and inventory event topics plus consumer-specific dead-letter topics |
 
-The services share neither databases nor Java domain models. Their integration contracts are versioned envelopes stored in `order_events` and `inventory_events` and emitted unchanged by Debezium.
+Domain services share neither databases nor Java domain models. The projection worker and query API are deliberately separate deployables within one CQRS read-side component: they share `order-query-model` and the query PostgreSQL database because they operate on the same materialized view and schema. Integration between domain services still uses versioned envelopes stored in `order_events` and `inventory_events` and emitted unchanged by Debezium.
 
 ## Run the complete system
 
@@ -65,7 +66,7 @@ make smoke
 make ui-smoke
 ```
 
-`make up` compiles the services, builds the React application, starts three PostgreSQL databases, Kafka, Debezium, Eureka, the gateway, Inventory, the order portal, two command-service replicas, and two query-service replicas, registers both CDC connectors idempotently, and waits for health checks. Open [http://localhost:3000](http://localhost:3000) or run `make ui-smoke` to verify the local UI. `make smoke` proves this flow through the gateway:
+`make up` compiles the services, builds the React application, starts three PostgreSQL databases, Kafka, Debezium, Eureka, the gateway, Inventory, the order portal, one projection worker, two command-service replicas, and two query-service replicas, registers both CDC connectors idempotently, and waits for health checks. Open [http://localhost:3000](http://localhost:3000) or run `make ui-smoke` to verify the local UI. `make smoke` proves this flow through the gateway:
 
 1. create an order;
 2. repeat the same command and verify idempotent replay;
@@ -75,9 +76,11 @@ make ui-smoke
 6. verify the read model reaches `CANCELLED` at version 3; and
 7. create an unavailable order and verify it reaches `REJECTED` without reducing stock.
 
+The primary CQRS read side intentionally separates event ingestion from request serving. `order-projection-worker` owns Kafka consumption and materialization, while `order-query-service` only reads the already-materialized model. They can be rolled out and scaled independently without pretending that they are independent data-owning services. See [ADR-008](docs/adr/008-independent-cqrs-projection-worker.md) for the boundary and trade-offs.
+
 The Azure image enables an additional portal proof that independently verifies the created, confirmed, and cancelled order events in Cosmos DB through the read-only Function route. The local image omits this cloud-only step while retaining the complete saga and CQRS flow.
 
-`make scale-smoke` then stops every command and query replica in turn. It waits for Eureka to evict the stopped instance and proves that the gateway continues routing commands and queries to the surviving replica before restoring the full topology.
+`make scale-smoke` then stops every command and query replica in turn. It waits for Eureka to evict the stopped instance and proves that the gateway continues routing commands and queries to the surviving replica before restoring the full topology. The projection worker is independent of that HTTP replica test.
 
 The Maven reactor also packages `order-activity-function`, a Java 21 Azure Function that consumes the same Kafka event contract and writes an idempotent document projection to Azure Cosmos DB. The Azure deployment places it on Flex Consumption with private virtual-network access to Kafka, managed-identity access to Cosmos DB, and a read-only same-origin activity route. It remains an independent cloud extension rather than a dependency of the local order path. See [ADR-005](docs/adr/005-serverless-nosql-activity-projection.md) for its boundary and deployment trade-offs.
 
@@ -89,11 +92,11 @@ make down
 
 ## Deploy to Azure
 
-The repository includes a credit-protected Azure deployment with Terraform, Azure Virtual Network, a hardened Linux VM, a checksum-verified K3s cluster, Azure Functions Flex Consumption, Cosmos DB for NoSQL, private storage endpoints and DNS, private versioned Blob state, managed identities, GitHub Actions OIDC, Azure Run Command, boot diagnostics, a resource-group budget, stable DNS, and Caddy-managed HTTPS. Kubernetes owns the stateless application tier and replaces Eureka with Services and DNS on Azure; Compose retains PostgreSQL, Kafka, and Debezium so the migration preserves durable state and connector offsets. Provisioning still refuses to proceed unless the Azure subscription is enabled with spending protection set to `On`.
+The repository includes a credit-protected Azure deployment with Terraform, Azure Virtual Network, a hardened Linux VM, a checksum-verified K3s cluster, Azure Functions Flex Consumption, Cosmos DB for NoSQL, private storage endpoints and DNS, private versioned Blob state, managed identities, GitHub Actions OIDC, Azure Run Command, boot diagnostics, a resource-group budget, stable DNS, and Caddy-managed HTTPS. Kubernetes owns the stateless application tier, including the independent order projection worker, and replaces Eureka with Services and DNS on Azure; Compose retains PostgreSQL, Kafka, and Debezium so the migration preserves durable state and connector offsets. Provisioning still refuses to proceed unless the Azure subscription is enabled with spending protection set to `On`.
 
 Live React order portal and public API: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
 
-See [Azure cloud deployment](docs/azure-deployment.md) for the architecture, provisioning command, Kubernetes boundary, security model, cost boundary, delivery flow, operations, and teardown procedure. [ADR-004](docs/adr/004-credit-protected-azure-deployment.md) records why the complete topology uses promotional credit on one 8-GiB VM instead of the undersized 12-month free VM shapes; [ADR-007](docs/adr/007-incremental-kubernetes-application-tier.md) records the incremental Kubernetes migration and its production boundary.
+See [Azure cloud deployment](docs/azure-deployment.md) for the architecture, provisioning command, Kubernetes boundary, security model, cost boundary, delivery flow, operations, and teardown procedure. [ADR-004](docs/adr/004-credit-protected-azure-deployment.md) records why the complete topology uses promotional credit on one 8-GiB VM instead of the undersized 12-month free VM shapes; [ADR-007](docs/adr/007-incremental-kubernetes-application-tier.md) records the incremental Kubernetes migration and its production boundary; [ADR-008](docs/adr/008-independent-cqrs-projection-worker.md) records the query/projection runtime split.
 
 ## Preserved AWS deployment
 
@@ -140,6 +143,7 @@ Backend replicas receive random host ports so they can scale without collisions.
 ```bash
 docker compose port --index 1 order-command-service 8081
 docker compose port --index 1 order-query-service 8082
+docker compose port order-projection-worker 8085
 docker compose port inventory-service 8084
 ```
 
@@ -152,6 +156,7 @@ docker compose port inventory-service 8084
 - **Local saga atomicity:** inventory changes stock and appends its reservation event in one database transaction; Order and Inventory never share a transaction.
 - **No application-level database/Kafka dual write:** each domain transaction ends after appending its event. Debezium reads only committed WAL changes and owns publication to Kafka.
 - **At-least-once delivery:** connector or consumer recovery can redeliver a record. Consumer inbox tables and projection `processed_events` make replay harmless.
+- **Independent read-side scaling:** the projection worker consumes Kafka separately from the replicated HTTP query service, so query traffic and projection throughput no longer share a replica count.
 - **Explicit compensation:** `OrderCancelled.v1` releases an active reservation and appends `InventoryReleased.v1`; history is never edited.
 - **Per-order ordering:** every event has a contiguous aggregate version and uses `orderId` as its Kafka key, preserving the partition-ordering boundary.
 - **Poison-event isolation:** projection failures retry twice and then move to `orders.events.v1.DLT`.
@@ -159,7 +164,7 @@ docker compose port inventory-service 8084
 - **Idempotent client retries:** PostgreSQL atomically claims `Idempotency-Key` and binds it to a deterministic request fingerprint.
 - **Honest eventual consistency:** query responses include `X-Data-Consistency: eventual`; a newly committed order may briefly be absent from the read side.
 
-See [Architecture](docs/architecture.md), [ADR-001](docs/adr/001-event-sourcing-and-debezium-cdc.md), and [ADR-006](docs/adr/006-choreographed-order-inventory-saga.md) for the detailed mechanics and trade-offs.
+See [Architecture](docs/architecture.md), [ADR-001](docs/adr/001-event-sourcing-and-debezium-cdc.md), [ADR-006](docs/adr/006-choreographed-order-inventory-saga.md), and [ADR-008](docs/adr/008-independent-cqrs-projection-worker.md) for the detailed mechanics and trade-offs.
 
 ## Verification
 
@@ -173,7 +178,7 @@ make scale-smoke
 GATEWAY_URL=https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com ./scripts/serverless-smoke-test.sh
 ```
 
-The test suite covers both aggregate lifecycles, versioned serialization, append-only database enforcement, stock reservation and compensation, concurrent create/cancel commands, idempotent command fingerprints, duplicate event delivery, stale projection versions, dead-letter routing, API behavior, gateway correlation IDs, and load-balanced route configuration. The smoke tests add real PostgreSQL logical decoding, two Debezium connectors, Kafka, Eureka registration, service failover, all three databases, Flyway, and all HTTP services.
+The test suite covers both aggregate lifecycles, versioned serialization, append-only database enforcement, stock reservation and compensation, concurrent create/cancel commands, idempotent command fingerprints, duplicate event delivery, stale projection versions, dead-letter routing, API behavior, gateway correlation IDs, and load-balanced route configuration. The smoke tests add real PostgreSQL logical decoding, two Debezium connectors, Kafka, the independent projection worker, Eureka registration, service failover, all three databases, Flyway, and all HTTP services.
 
 ## Technology baseline
 
@@ -195,22 +200,24 @@ The test suite covers both aggregate lifecycles, versioned serialization, append
 ## Repository map
 
 ```text
-api-gateway/             HTTP entry point and routing
-discovery-server/        Eureka service registry
-frontend/                React customer portal and architecture proof
-order-command-service/  event-sourced aggregate, event store, command API
-inventory-service/      stock consistency and event-sourced reservation lifecycle
-order-query-service/    Kafka projection, read model, query API
-order-activity-function/ serverless Kafka-to-Cosmos activity projection
-debezium/                replication user and connector registration
-docs/                    architecture narrative and decisions
-scripts/                 end-to-end and multi-replica failover checks
-infra/aws/               Terraform state bootstrap and AWS runtime infrastructure
-infra/azure/             Terraform state bootstrap and Azure runtime infrastructure
-deploy/kubernetes/       Kubernetes base resources and Azure Kustomize overlay
-compose.yml              complete local platform
-compose.cloud.yml        cloud-only exposure, resource, secret, and logging policy
-compose.azure.yml        Azure exposure, resource, secret, logging, and HTTPS policy
+api-gateway/               HTTP entry point and routing
+discovery-server/          Eureka service registry
+frontend/                  React customer portal and architecture proof
+order-command-service/     event-sourced aggregate, event store, command API
+inventory-service/         stock consistency and event-sourced reservation lifecycle
+order-query-model/         shared relational CQRS read model and Flyway schema
+order-projection-worker/   Kafka-to-query-PostgreSQL projection worker
+order-query-service/       read-only CQRS query API
+order-activity-function/   serverless Kafka-to-Cosmos activity projection
+debezium/                  replication user and connector registration
+docs/                      architecture narrative and decisions
+scripts/                   end-to-end and multi-replica failover checks
+infra/aws/                 Terraform state bootstrap and AWS runtime infrastructure
+infra/azure/               Terraform state bootstrap and Azure runtime infrastructure
+deploy/kubernetes/         Kubernetes base resources and Azure Kustomize overlay
+compose.yml                complete local platform
+compose.cloud.yml          cloud-only exposure, resource, secret, and logging policy
+compose.azure.yml          Azure exposure, resource, secret, logging, and HTTPS policy
 compose.kubernetes-platform.yml private host bindings for retained Azure platform services
 ```
 

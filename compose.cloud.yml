@@ -99,11 +99,23 @@ services:
         awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
         tag: "{{.Name}}"
 
+  order-projection-worker:
+    ports: !reset []
+    environment:
+      DATABASE_PASSWORD: "${QUERY_DB_PASSWORD:?Set QUERY_DB_PASSWORD}"
+    mem_limit: 512m
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        tag: "{{.Name}}"
+
   order-query-service:
     ports: !reset []
     environment:
       DATABASE_PASSWORD: "${QUERY_DB_PASSWORD:?Set QUERY_DB_PASSWORD}"
-    mem_limit: 640m
+    mem_limit: 512m
     logging:
       driver: awslogs
       options:

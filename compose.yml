@@ -264,6 +264,29 @@ services:
       retries: 30
       start_period: 10s
 
+  order-projection-worker:
+    build:
+      context: .
+      dockerfile: order-projection-worker/Dockerfile
+    environment:
+      DATABASE_URL: jdbc:postgresql://query-db:5432/orders_query
+      DATABASE_USERNAME: orders
+      DATABASE_PASSWORD: orders
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    ports:
+      - "8085"
+    depends_on:
+      query-db:
+        condition: service_healthy
+      debezium-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8085/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
   order-query-service:
     build:
       context: .
@@ -272,7 +295,6 @@ services:
       DATABASE_URL: jdbc:postgresql://query-db:5432/orders_query
       DATABASE_USERNAME: orders
       DATABASE_PASSWORD: orders
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       EUREKA_URL: http://discovery-server:8761/eureka/
       EUREKA_LEASE_RENEWAL_INTERVAL_SECONDS: 5
       EUREKA_LEASE_EXPIRATION_SECONDS: 15
@@ -281,8 +303,6 @@ services:
     depends_on:
       query-db:
         condition: service_healthy
-      debezium-init:
-        condition: service_completed_successfully
       discovery-server:
         condition: service_healthy
     healthcheck:
