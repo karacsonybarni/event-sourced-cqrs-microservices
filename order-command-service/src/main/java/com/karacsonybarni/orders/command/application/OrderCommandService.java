@@ -58,26 +58,17 @@ public class OrderCommandService {
 
     @Transactional
     public CommandResult cancel(UUID orderId) {
-        Order order = eventStore.loadForUpdate(orderId);
-        if (order.cancel(clock.instant())) {
-            eventStore.append(order);
-        }
+        Order order = eventStore.update(orderId, currentOrder -> currentOrder.cancel(clock.instant()));
         return CommandResult.accepted(order);
     }
 
     @Transactional
     public void confirmInventoryReservation(UUID orderId) {
-        Order order = eventStore.loadForUpdate(orderId);
-        if (order.confirm(clock.instant())) {
-            eventStore.append(order);
-        }
+        eventStore.update(orderId, order -> order.confirm(clock.instant()));
     }
 
     @Transactional
     public void rejectInventoryReservation(UUID orderId, String reason) {
-        Order order = eventStore.loadForUpdate(orderId);
-        if (order.reject(reason, clock.instant())) {
-            eventStore.append(order);
-        }
+        eventStore.update(orderId, order -> order.reject(reason, clock.instant()));
     }
 }
