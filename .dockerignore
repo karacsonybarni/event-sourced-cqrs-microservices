@@ -26,6 +26,12 @@ inventory-service/**
 !inventory-service/target/
 inventory-service/target/**
 !inventory-service/target/inventory-service-*.jar
+!order-projection-worker/
+order-projection-worker/**
+!order-projection-worker/Dockerfile
+!order-projection-worker/target/
+order-projection-worker/target/**
+!order-projection-worker/target/order-projection-worker-*.jar
 !order-query-service/
 order-query-service/**
 !order-query-service/Dockerfile
