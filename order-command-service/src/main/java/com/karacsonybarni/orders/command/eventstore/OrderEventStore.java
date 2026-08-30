@@ -2,6 +2,7 @@ package com.karacsonybarni.orders.command.eventstore;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 import com.karacsonybarni.orders.command.domain.Order;
 import com.karacsonybarni.orders.command.domain.OrderNotFoundException;
@@ -38,18 +39,18 @@ public class OrderEventStore {
         return order;
     }
 
-    public Order loadForUpdate(UUID aggregateId) {
+    public Order update(UUID aggregateId, Consumer<Order> operation) {
         AggregateStream stream = streamRepository.findByIdForUpdate(aggregateId)
                 .orElseThrow(() -> new OrderNotFoundException(aggregateId));
         Order order = replay(aggregateId);
         verifyVersion(stream, order.getVersion());
-        return order;
-    }
 
-    public void append(Order order) {
-        AggregateStream stream = streamRepository.findByIdForUpdate(order.getId())
-                .orElseThrow(() -> new OrderNotFoundException(order.getId()));
-        appendTo(stream, order);
+        operation.accept(order);
+
+        if (!order.getUncommittedEvents().isEmpty()) {
+            appendTo(stream, order);
+        }
+        return order;
     }
 
     private Order replay(UUID aggregateId) {
