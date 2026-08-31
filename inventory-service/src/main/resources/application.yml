@@ -32,17 +32,6 @@ server:
   port: ${SERVER_PORT:8084}
   shutdown: graceful
 
-eureka:
-  client:
-    service-url:
-      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
-    healthcheck:
-      enabled: true
-  instance:
-    prefer-ip-address: true
-    lease-renewal-interval-in-seconds: ${EUREKA_LEASE_RENEWAL_INTERVAL_SECONDS:30}
-    lease-expiration-duration-in-seconds: ${EUREKA_LEASE_EXPIRATION_SECONDS:90}
-
 orders:
   events:
     topic: orders.events.v1

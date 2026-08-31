@@ -3,7 +3,6 @@ set -Eeuo pipefail
 
 gateway_url="${GATEWAY_URL:-http://localhost:8080}"
 gateway_health_url="${GATEWAY_HEALTH_URL:-${gateway_url}}"
-discovery_url="${DISCOVERY_URL:-http://localhost:8761}"
 expected_command_instances="${EXPECTED_COMMAND_INSTANCES:-1}"
 expected_query_instances="${EXPECTED_QUERY_INSTANCES:-1}"
 expected_inventory_instances="${EXPECTED_INVENTORY_INSTANCES:-1}"
@@ -23,29 +22,36 @@ wait_for_health() {
   return 1
 }
 
-registry_instance_count() {
-  local application_name="$1"
-  local response
-  if ! response="$(curl --fail --silent \
-    --header 'Accept: application/json' \
-    "${discovery_url}/eureka/apps/${application_name}")"; then
-    printf '0\n'
-    return
-  fi
-  jq -r '[.application.instance[]? | select(.status == "UP")] | length' <<<"${response}"
+healthy_container_count() {
+  local service_name="$1"
+  local container_id
+  local health_status
+  local count=0
+  while IFS= read -r container_id; do
+    if [[ -z "${container_id}" ]]; then
+      continue
+    fi
+    health_status="$(docker inspect \
+      --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+      "${container_id}")"
+    if [[ "${health_status}" == "healthy" || "${health_status}" == "running" ]]; then
+      ((count += 1))
+    fi
+  done < <(docker compose ps --status running --quiet "${service_name}")
+  printf '%d\n' "${count}"
 }
 
 wait_for_instances() {
-  local application_name="$1"
+  local service_name="$1"
   local expected_count="$2"
   local attempts=60
   for ((attempt = 1; attempt <= attempts; attempt++)); do
-    if [[ "$(registry_instance_count "${application_name}")" -ge "${expected_count}" ]]; then
+    if [[ "$(healthy_container_count "${service_name}")" -ge "${expected_count}" ]]; then
       return 0
     fi
     sleep 1
   done
-  echo "${application_name} did not register ${expected_count} instances" >&2
+  echo "${service_name} did not reach ${expected_count} healthy containers" >&2
   return 1
 }
 
@@ -95,9 +101,9 @@ wait_for_inventory_event() {
 
 if [[ "${verify_platform}" == "true" ]]; then
   wait_for_health
-  wait_for_instances ORDER-COMMAND-SERVICE "${expected_command_instances}"
-  wait_for_instances ORDER-QUERY-SERVICE "${expected_query_instances}"
-  wait_for_instances INVENTORY-SERVICE "${expected_inventory_instances}"
+  wait_for_instances order-command-service "${expected_command_instances}"
+  wait_for_instances order-query-service "${expected_query_instances}"
+  wait_for_instances inventory-service "${expected_inventory_instances}"
 fi
 
 if [[ "${verify_inventory_state}" == "true" ]]; then

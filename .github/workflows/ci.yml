@@ -3,8 +3,7 @@ name: CI
 on:
   workflow_dispatch:
   push:
-    # Bootstrap exact-SHA CI for this migration before workflow_dispatch exists on main.
-    branches: [main, codex/kubernetes-azure-migration]
+    branches: [main, "codex/**"]
   pull_request:
 
 permissions:
@@ -137,8 +136,25 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Reject purpose-specific presentation wording
         run: |
-          if git grep -I -n -i -E 'inter[v]iew|show[c]ase'; then
+          if git grep -I -n -i -E 'inter[v]iew|show[c]ase' -- . \
+            ':(exclude)**/.env' ':(exclude)**/*.key' ':(exclude)**/*.pem' \
+            ':(exclude)**/secrets/**' ':(exclude)**/target/**' \
+            ':(exclude)**/.terraform/**' ':(exclude)**/*.tfplan' \
+            ':(exclude)**/*.tfstate' ':(exclude)**/*.tfstate.*' \
+            ':(exclude)**/*.tfvars'; then
             echo 'Use architecture-focused wording in maintained artifacts.' >&2
+            exit 1
+          fi
+      - name: Reject application-level discovery artifacts
+        run: |
+          if git grep -I -n -i -E 'eure[k]a|discovery[-]server|spring-cloud-starter-netfli[x]|876[1]' \
+            -- . ':(exclude)docs/adr/**' \
+            ':(exclude)**/.env' ':(exclude)**/*.key' ':(exclude)**/*.pem' \
+            ':(exclude)**/secrets/**' ':(exclude)**/target/**' \
+            ':(exclude)**/.terraform/**' ':(exclude)**/*.tfplan' \
+            ':(exclude)**/*.tfstate' ':(exclude)**/*.tfstate.*' \
+            ':(exclude)**/*.tfvars'; then
+            echo 'Use deployment-platform DNS and service routing in maintained runtime artifacts.' >&2
             exit 1
           fi
       - name: Verify Maven reactor
@@ -226,7 +242,7 @@ jobs:
         run: make smoke
       - name: Verify React order portal
         run: make ui-smoke
-      - name: Verify discovery and replica failover
+      - name: Verify platform DNS routing and replica failover
         run: make scale-smoke
       - name: Capture service logs on failure
         if: failure()

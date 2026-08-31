@@ -10,10 +10,6 @@
 		respond 404
 	}
 
-	handle /eureka/* {
-		respond 404
-	}
-
 	handle /connectors/* {
 		respond 404
 	}

@@ -19,7 +19,6 @@
   <description>CQRS microservices with event sourcing, saga choreography, and Debezium change data capture</description>
 
   <modules>
-    <module>discovery-server</module>
     <module>api-gateway</module>
     <module>order-command-service</module>
     <module>inventory-service</module>

@@ -47,7 +47,7 @@ fi
 
 ./scripts/azure/install-k3s.sh
 
-legacy_compose=(
+application_compose=(
   docker compose
   --profile ui
   --env-file "${runtime_environment}"
@@ -55,7 +55,7 @@ legacy_compose=(
   --file compose.azure.yml
 )
 compose=(
-  "${legacy_compose[@]}"
+  "${application_compose[@]}"
   --file compose.kubernetes-platform.yml
 )
 export PLATFORM_HOST="${platform_host}"
@@ -88,11 +88,11 @@ cleanup() {
          "${cluster_mutated}" == "true") ]]; then
     if [[ "${cluster_existed}" != "true" ]]; then
       k3s kubectl delete namespace "${namespace}" --ignore-not-found --wait --timeout=120s
-      "${legacy_compose[@]}" up --no-build --detach --wait \
+      "${application_compose[@]}" up --no-build --detach --wait --remove-orphans \
         --scale order-command-service=2 \
         --scale order-query-service=2 \
         command-db query-db inventory-db kafka kafka-init debezium \
-        discovery-server order-command-service order-projection-worker order-query-service \
+        order-command-service order-projection-worker order-query-service \
         inventory-service api-gateway frontend edge-proxy
     else
       if [[ "${runtime_config_mutated}" == "true" && -s "${runtime_config_backup}" ]]; then
@@ -197,6 +197,7 @@ fi
 
 platform_mutated="true"
 "${compose[@]}" up --no-build --detach --wait \
+  --remove-orphans \
   command-db query-db inventory-db kafka kafka-init debezium
 
 if [[ "${cluster_existed}" != "true" ]]; then
@@ -204,7 +205,7 @@ if [[ "${cluster_existed}" != "true" ]]; then
   # before Maven and image builds run alongside the K3s control plane.
   "${compose[@]}" stop \
     edge-proxy frontend api-gateway order-command-service \
-    order-projection-worker order-query-service inventory-service discovery-server
+    order-projection-worker order-query-service inventory-service
 fi
 
 ./mvnw --batch-mode --no-transfer-progress -DskipTests package
@@ -353,7 +354,7 @@ done
 
 "${compose[@]}" rm --force \
   edge-proxy frontend api-gateway order-command-service \
-  order-projection-worker order-query-service inventory-service discovery-server || true
+  order-projection-worker order-query-service inventory-service || true
 
 for attempt in {1..30}; do
   if curl --fail --silent --show-error "http://127.0.0.1" >/dev/null; then

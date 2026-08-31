@@ -1,20 +1,14 @@
 services:
-  discovery-server:
-    ports: !override
-      - "127.0.0.1:8761:8761"
-    mem_limit: 512m
+  command-db:
     logging: &azure_logging
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
-
-  command-db:
     ports: !reset []
     environment:
       POSTGRES_PASSWORD: "${COMMAND_DB_PASSWORD:?Set COMMAND_DB_PASSWORD}"
     mem_limit: 384m
-    logging: *azure_logging
 
   query-db:
     ports: !reset []

@@ -1,6 +1,6 @@
 # ADR-002: Use registry-backed gateway routing for local horizontal scaling
 
-- Status: Accepted
+- Status: Superseded by ADR-009
 - Date: 2026-08-24
 
 ## Context

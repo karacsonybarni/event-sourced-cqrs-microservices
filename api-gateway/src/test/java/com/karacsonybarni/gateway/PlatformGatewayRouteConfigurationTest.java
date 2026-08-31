@@ -12,17 +12,16 @@ import org.springframework.cloud.gateway.route.RouteDefinition;
 import org.springframework.cloud.gateway.route.RouteDefinitionLocator;
 
 @SpringBootTest(properties = {
-        "eureka.client.enabled=false",
         "ORDER_COMMAND_URI=http://order-command-service:8081",
         "ORDER_QUERY_URI=http://order-query-service:8082"
 })
-class KubernetesGatewayRouteConfigurationTest {
+class PlatformGatewayRouteConfigurationTest {
 
     @Autowired
     private RouteDefinitionLocator routeDefinitionLocator;
 
     @Test
-    void routesThroughKubernetesServicesWithoutEureka() {
+    void routesThroughPlatformServiceNames() {
         Map<String, URI> routeUris = routeDefinitionLocator.getRouteDefinitions()
                 .collectMap(RouteDefinition::getId, RouteDefinition::getUri)
                 .blockOptional()

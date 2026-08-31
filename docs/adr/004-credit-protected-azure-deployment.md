@@ -1,6 +1,6 @@
 # ADR-004: Credit-protected Azure deployment
 
-- Status: Superseded in part by ADR-007
+- Status: Superseded in part by ADR-007 and ADR-009
 - Date: 2026-08-26
 
 ## Context

@@ -18,13 +18,11 @@ flowchart LR
     Client([Browser / API client]) --> Frontend[React<br/>Order Portal]
     Frontend -->|same-origin /api| Gateway[Spring Cloud<br/>API Gateway]
     Frontend -. same-origin /serverless .-> ActivityFunction
-    Discovery[Local: Eureka registry<br/>Azure: Kubernetes Services]
-    Gateway <-->|resolve application instances| Discovery
-    Command[Order Command Service<br/>2 replicas] --> Discovery
-    Inventory[Inventory Service] --> Discovery
-    Query[Order Query Service<br/>2 replicas] --> Discovery
-    Gateway -->|POST / PUT| Command
-    Gateway -->|GET| Query
+    Command[Order Command Service<br/>2 replicas]
+    Inventory[Inventory Service]
+    Query[Order Query Service<br/>2 replicas]
+    Gateway -->|POST / PUT<br/>platform service DNS| Command
+    Gateway -->|GET<br/>platform service DNS| Query
 
     Command -->|append in one ACID transaction| EventStore[(Command PostgreSQL<br/>append-only event store)]
     EventStore -->|logical replication / WAL| Debezium[Debezium<br/>PostgreSQL connector]
@@ -45,7 +43,6 @@ flowchart LR
 | --- | --- | --- |
 | `frontend` | Customer order workflow and live architecture proof | None |
 | `api-gateway` | Method-aware routing and correlation IDs | None |
-| `discovery-server` | Local Compose registry and health-aware service lookup; replaced by Kubernetes Services on Azure | Local registry leases |
 | `order-command-service` | Validates commands, replays aggregates, appends events | Event streams and command deduplication |
 | `inventory-service` | Reserves stock, rejects unavailable orders, and compensates cancellation | Transactional stock plus event-sourced reservation streams |
 | Debezium | Captures committed event inserts from PostgreSQL WAL | Replication offset and connector state |
@@ -66,7 +63,7 @@ make smoke
 make ui-smoke
 ```
 
-`make up` compiles the services, builds the React application, starts three PostgreSQL databases, Kafka, Debezium, Eureka, the gateway, Inventory, the order portal, one projection worker, two command-service replicas, and two query-service replicas, registers both CDC connectors idempotently, and waits for health checks. Open [http://localhost:3000](http://localhost:3000) or run `make ui-smoke` to verify the local UI. `make smoke` proves this flow through the gateway:
+`make up` compiles the services, builds the React application, starts three PostgreSQL databases, Kafka, Debezium, the gateway, Inventory, the order portal, one projection worker, two command-service replicas, and two query-service replicas, registers both CDC connectors idempotently, and waits for health checks. Compose service DNS connects the gateway to the replicated command and query services. Open [http://localhost:3000](http://localhost:3000) or run `make ui-smoke` to verify the local UI. `make smoke` proves this flow through the gateway:
 
 1. create an order;
 2. repeat the same command and verify idempotent replay;
@@ -76,11 +73,11 @@ make ui-smoke
 6. verify the read model reaches `CANCELLED` at version 3; and
 7. create an unavailable order and verify it reaches `REJECTED` without reducing stock.
 
-The primary CQRS read side intentionally separates event ingestion from request serving. `order-projection-worker` owns Kafka consumption and materialization, while `order-query-service` only reads the already-materialized model. They can be rolled out and scaled independently without pretending that they are independent data-owning services. See [ADR-008](docs/adr/008-independent-cqrs-projection-worker.md) for the boundary and trade-offs.
+The primary CQRS read side intentionally separates event ingestion from request serving. `order-projection-worker` owns Kafka consumption and materialization, while `order-query-service` only reads the already-materialized model. They can be rolled out and scaled independently without pretending that they are independent data-owning services. See [ADR-008](docs/adr/008-independent-cqrs-projection-worker.md) for the boundary and trade-offs, and [ADR-009](docs/adr/009-platform-native-service-routing.md) for the platform service-routing contract.
 
 The Azure image enables an additional portal proof that independently verifies the created, confirmed, and cancelled order events in Cosmos DB through the read-only Function route. The local image omits this cloud-only step while retaining the complete saga and CQRS flow.
 
-`make scale-smoke` then stops every command and query replica in turn. It waits for Eureka to evict the stopped instance and proves that the gateway continues routing commands and queries to the surviving replica before restoring the full topology. The projection worker is independent of that HTTP replica test.
+`make scale-smoke` then stops every command and query replica in turn. It verifies that Compose removes the stopped container from the running service set and that the gateway continues routing commands and queries through platform DNS to the surviving replica before restoring the full topology. The projection worker is independent of that HTTP replica test.
 
 The Maven reactor also packages `order-activity-function`, a Java 21 Azure Function that consumes the same Kafka event contract and writes an idempotent document projection to Azure Cosmos DB. The Azure deployment places it on Flex Consumption with private virtual-network access to Kafka, managed-identity access to Cosmos DB, and a read-only same-origin activity route. It remains an independent cloud extension rather than a dependency of the local order path. See [ADR-005](docs/adr/005-serverless-nosql-activity-projection.md) for its boundary and deployment trade-offs.
 
@@ -92,7 +89,7 @@ make down
 
 ## Deploy to Azure
 
-The repository includes a credit-protected Azure deployment with Terraform, Azure Virtual Network, a hardened Linux VM, a checksum-verified K3s cluster, Azure Functions Flex Consumption, Cosmos DB for NoSQL, private storage endpoints and DNS, private versioned Blob state, managed identities, GitHub Actions OIDC, Azure Run Command, boot diagnostics, a resource-group budget, stable DNS, and Caddy-managed HTTPS. Kubernetes owns the stateless application tier, including the independent order projection worker, and replaces Eureka with Services and DNS on Azure; Compose retains PostgreSQL, Kafka, and Debezium so the migration preserves durable state and connector offsets. Provisioning still refuses to proceed unless the Azure subscription is enabled with spending protection set to `On`.
+The repository includes a credit-protected Azure deployment with Terraform, Azure Virtual Network, a hardened Linux VM, a checksum-verified K3s cluster, Azure Functions Flex Consumption, Cosmos DB for NoSQL, private storage endpoints and DNS, private versioned Blob state, managed identities, GitHub Actions OIDC, Azure Run Command, boot diagnostics, a resource-group budget, stable DNS, and Caddy-managed HTTPS. Kubernetes owns the stateless application tier, including the independent order projection worker, and its Services and DNS route application traffic; Compose retains PostgreSQL, Kafka, and Debezium so the migration preserves durable state and connector offsets. Provisioning still refuses to proceed unless the Azure subscription is enabled with spending protection set to `On`.
 
 Live React order portal and public API: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
 
@@ -133,7 +130,6 @@ curl 'http://localhost:8080/api/orders?customerId=customer-42&status=CANCELLED'
 
 Operational endpoints:
 
-- Eureka registry: [http://localhost:8761](http://localhost:8761)
 - Debezium Connect: [order connector](http://localhost:8083/connectors/order-events/status) and [inventory connector](http://localhost:8083/connectors/inventory-events/status)
 - Gateway health: [http://localhost:8080/actuator/health](http://localhost:8080/actuator/health)
 - Prometheus metrics: `/actuator/prometheus` on every Spring service
@@ -178,14 +174,14 @@ make scale-smoke
 GATEWAY_URL=https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com ./scripts/serverless-smoke-test.sh
 ```
 
-The test suite covers both aggregate lifecycles, versioned serialization, append-only database enforcement, stock reservation and compensation, concurrent create/cancel commands, idempotent command fingerprints, duplicate event delivery, stale projection versions, dead-letter routing, API behavior, gateway correlation IDs, and load-balanced route configuration. The smoke tests add real PostgreSQL logical decoding, two Debezium connectors, Kafka, the independent projection worker, Eureka registration, service failover, all three databases, Flyway, and all HTTP services.
+The test suite covers both aggregate lifecycles, versioned serialization, append-only database enforcement, stock reservation and compensation, concurrent create/cancel commands, idempotent command fingerprints, duplicate event delivery, stale projection versions, dead-letter routing, API behavior, gateway correlation IDs, and platform-service route configuration. The smoke tests add real PostgreSQL logical decoding, two Debezium connectors, Kafka, the independent projection worker, platform health checks, replica failover, all three databases, Flyway, and all HTTP services.
 
 ## Technology baseline
 
 - Java 21 LTS
 - React 19.2, TypeScript 6, Vite 8.2, and Nginx
 - Spring Boot 4.1.1
-- Spring Cloud 2025.1.3, Spring Cloud Gateway, LoadBalancer, and Netflix Eureka
+- Spring Cloud 2025.1.3 and Spring Cloud Gateway
 - Spring Data JPA, Flyway, PostgreSQL 18
 - Debezium 3.6.1.Final PostgreSQL connector
 - Spring for Apache Kafka and Apache Kafka 4.3.1 in KRaft mode
@@ -201,7 +197,6 @@ The test suite covers both aggregate lifecycles, versioned serialization, append
 
 ```text
 api-gateway/               HTTP entry point and routing
-discovery-server/          Eureka service registry
 frontend/                  React customer portal and architecture proof
 order-command-service/     event-sourced aggregate, event store, command API
 inventory-service/         stock consistency and event-sourced reservation lifecycle

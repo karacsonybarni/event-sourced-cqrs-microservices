@@ -1,6 +1,6 @@
 # ADR-007: Incremental Kubernetes application tier on Azure
 
-- Status: Accepted
+- Status: Superseded in part by ADR-009
 - Date: 2026-08-29
 
 ## Context

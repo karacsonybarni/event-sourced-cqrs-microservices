@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 
 gateway_url="${GATEWAY_URL:-http://localhost:8080}"
-discovery_url="${DISCOVERY_URL:-http://localhost:8761}"
 stopped_containers=()
 
 restore_containers() {
@@ -13,29 +12,36 @@ restore_containers() {
 }
 trap restore_containers EXIT
 
-registry_instance_count() {
-  local application_name="$1"
-  local response
-  if ! response="$(curl --fail --silent \
-    --header 'Accept: application/json' \
-    "${discovery_url}/eureka/apps/${application_name}")"; then
-    printf '0\n'
-    return
-  fi
-  jq -r '[.application.instance[]? | select(.status == "UP")] | length' <<<"${response}"
+healthy_container_count() {
+  local service_name="$1"
+  local container_id
+  local health_status
+  local count=0
+  while IFS= read -r container_id; do
+    if [[ -z "${container_id}" ]]; then
+      continue
+    fi
+    health_status="$(docker inspect \
+      --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+      "${container_id}")"
+    if [[ "${health_status}" == "healthy" || "${health_status}" == "running" ]]; then
+      ((count += 1))
+    fi
+  done < <(docker compose ps --status running --quiet "${service_name}")
+  printf '%d\n' "${count}"
 }
 
 wait_for_instance_count() {
-  local application_name="$1"
+  local service_name="$1"
   local expected_count="$2"
   local attempts=60
   for ((attempt = 1; attempt <= attempts; attempt++)); do
-    if [[ "$(registry_instance_count "${application_name}")" -eq "${expected_count}" ]]; then
+    if [[ "$(healthy_container_count "${service_name}")" -eq "${expected_count}" ]]; then
       return 0
     fi
     sleep 1
   done
-  echo "${application_name} did not reach ${expected_count} registered instances" >&2
+  echo "${service_name} did not reach ${expected_count} healthy containers" >&2
   return 1
 }
 
@@ -78,29 +84,29 @@ mapfile -t command_containers < <(docker compose ps -q order-command-service)
 mapfile -t query_containers < <(docker compose ps -q order-query-service)
 test "${#command_containers[@]}" -eq 2
 test "${#query_containers[@]}" -eq 2
-wait_for_instance_count ORDER-COMMAND-SERVICE 2
-wait_for_instance_count ORDER-QUERY-SERVICE 2
+wait_for_instance_count order-command-service 2
+wait_for_instance_count order-query-service 2
 
 last_order_id=""
 for container_id in "${command_containers[@]}"; do
   docker stop "${container_id}" >/dev/null
   stopped_containers+=("${container_id}")
-  wait_for_instance_count ORDER-COMMAND-SERVICE 1
+  wait_for_instance_count order-command-service 1
   last_order_id="$(create_order)"
   wait_for_order "${last_order_id}"
   docker start "${container_id}" >/dev/null
   stopped_containers=()
-  wait_for_instance_count ORDER-COMMAND-SERVICE 2
+  wait_for_instance_count order-command-service 2
 done
 
 for container_id in "${query_containers[@]}"; do
   docker stop "${container_id}" >/dev/null
   stopped_containers+=("${container_id}")
-  wait_for_instance_count ORDER-QUERY-SERVICE 1
+  wait_for_instance_count order-query-service 1
   wait_for_order "${last_order_id}"
   docker start "${container_id}" >/dev/null
   stopped_containers=()
-  wait_for_instance_count ORDER-QUERY-SERVICE 2
+  wait_for_instance_count order-query-service 2
 done
 
-printf 'Discovery and failover test passed with two command and two query replicas\n'
+printf 'Platform DNS routing and failover test passed with two command and two query replicas\n'

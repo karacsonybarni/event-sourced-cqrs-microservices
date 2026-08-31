@@ -6,7 +6,7 @@ This deployment keeps the complete event-sourced CQRS topology available on Azur
 
 Verified React order portal and API endpoint: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
 
-The tested `Standard_B2as_v2` VM has two vCPUs and 8 GiB of memory. A measurement before the Kubernetes migration showed about 4.7 GiB in use and 3.1 GiB available. K3s replaces the Compose application containers and Eureka rather than duplicating them, leaving enough measured headroom for its control plane and containerd. This remains a constrained demonstration target, not a production capacity recommendation.
+The tested `Standard_B2as_v2` VM has two vCPUs and 8 GiB of memory. A measurement before the Kubernetes migration showed about 4.7 GiB in use and 3.1 GiB available. K3s owns the stateless application containers instead of duplicating them in Compose, leaving enough measured headroom for its control plane and containerd. This remains a constrained demonstration target, not a production capacity recommendation.
 
 The VM is not one of Azure's 12-month free shapes; promotional credit funds it. `scripts/azure/verify-free-plan.sh` blocks provisioning unless the subscription is `Enabled` and its spending limit is `On`, so Azure stops resources instead of charging a payment method when included credit is exhausted. The public service therefore remains available only while promotional credit or another credit-backed allowance remains active.
 
@@ -52,7 +52,7 @@ flowchart TB
 
 Kubernetes owns the command, query, Inventory, gateway, frontend, and edge workloads in the `cqrs-orders` namespace. Deployments use immutable commit-SHA image tags, rolling-update policy, startup/readiness/liveness probes, graceful termination, explicit resource requests and limits, runtime-default seccomp, restricted service-account token mounting, and ingress NetworkPolicies. Kustomize owns the reusable base and Azure overlay. The edge keeps certificate state in a one-GiB local-path persistent volume.
 
-Eureka is not deployed on Azure. The gateway receives direct Kubernetes Service URIs, and application pods disable the Eureka client. Local Compose retains Eureka so the local discovery and replica-failover exercise remains available.
+The gateway receives direct Kubernetes Service URIs, so Kubernetes DNS and ready Service endpoints own routing to command and query replicas. Local and AWS Compose environments use the same gateway contract with Compose service DNS.
 
 PostgreSQL, Kafka, and Debezium stay in Compose for this increment to preserve existing data volumes, replication slots, connector offsets, and event history. Selectorless Kubernetes Services with explicit EndpointSlices map stable in-cluster names to the VM's private `10.42.1.4` platform listeners. K3s uses `10.244.0.0/16` for pods and `10.96.0.0/12` for Services so neither range overlaps the Azure virtual network's `10.42.0.0/16` address space.
 
@@ -107,9 +107,9 @@ The recovery SSH private key is generated under `AZURE_CONFIG_DIR` and is never 
 
 ## Delivery and verification
 
-`.github/workflows/deploy-azure.yml` runs after successful `main` CI or by manual dispatch for a selected branch. Manual dispatch refuses a revision without successful exact-SHA CI, and manual CI reruns integration unless its parent is itself proven successful. GitHub only enables `workflow_dispatch` after that trigger exists on the default branch, so the initial Kubernetes migration uses a narrowly scoped `codex/kubernetes-azure-migration` push trigger to validate the topic SHA before its manual Azure deployment. That bootstrap does not automatically deploy other topic branches. GitHub exchanges its OIDC token for short-lived Azure credentials and deploys the exact checked-out commit. The Function package is updated first. Azure Run Command then installs or reconciles the pinned K3s version, preserves the Compose platform, builds application images from that commit, imports them into containerd, applies the Kustomize overlay, waits for every rollout, retires the superseded Compose application containers, registers both Debezium connectors idempotently, runs the saga smoke test through a gateway port-forward, retains one rollback image revision, and prunes older application images and excess build cache.
+`.github/workflows/deploy-azure.yml` runs after successful `main` CI or by manual dispatch for a selected branch. Topic branches under `codex/**` receive exact-SHA CI on push so a reviewed branch can pass CI and a manual Azure deployment before `main` advances. Manual dispatch refuses a revision without successful exact-SHA CI, and manual CI reruns integration unless its parent is itself proven successful. GitHub exchanges its OIDC token for short-lived Azure credentials and deploys the exact checked-out commit. The Function package is updated first. Azure Run Command then installs or reconciles the pinned K3s version, preserves the Compose platform, builds application images from that commit, imports them into containerd, applies the Kustomize overlay, waits for every rollout, retires the superseded Compose application containers, registers both Debezium connectors idempotently, runs the saga smoke test through a gateway port-forward, retains one rollback image revision, and prunes older application images and excess build cache.
 
-The workflow independently verifies that every Kubernetes application image uses the expected commit SHA, all Deployments are available, Eureka is absent, and the public saga, UI, HTTPS, and Kafka-to-Cosmos paths work. A successful workflow therefore proves the selected Git revision, the cluster rollout, and the externally observable behavior together.
+The workflow independently verifies that every Kubernetes application image uses the expected commit SHA, the exact expected Deployment set is available, and the public saga, UI, HTTPS, and Kafka-to-Cosmos paths work. A successful workflow therefore proves the selected Git revision, the cluster rollout, and the externally observable behavior together.
 
 Verify the public flow manually:
 
@@ -130,7 +130,7 @@ az vm run-command invoke \
   --scripts 'sudo k3s kubectl --namespace cqrs-orders get deployments,pods,services -o wide'
 ```
 
-Exercise replica replacement without relying on Eureka:
+Exercise replica replacement through Kubernetes Service routing:
 
 ```bash
 az vm run-command invoke \

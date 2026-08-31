@@ -8,12 +8,6 @@ api-gateway/**
 !api-gateway/target/
 api-gateway/target/**
 !api-gateway/target/api-gateway-*.jar
-!discovery-server/
-discovery-server/**
-!discovery-server/Dockerfile
-!discovery-server/target/
-discovery-server/target/**
-!discovery-server/target/discovery-server-*.jar
 !order-command-service/
 order-command-service/**
 !order-command-service/Dockerfile

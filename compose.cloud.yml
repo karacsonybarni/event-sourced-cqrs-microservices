@@ -1,15 +1,4 @@
 services:
-  discovery-server:
-    ports: !override
-      - "127.0.0.1:8761:8761"
-    mem_limit: 512m
-    logging:
-      driver: awslogs
-      options:
-        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
-        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
-        tag: "{{.Name}}"
-
   command-db:
     ports: !reset []
     environment:

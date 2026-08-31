@@ -1,6 +1,6 @@
 # AWS cloud deployment
 
-This deployment keeps the complete application topology intact while minimizing fixed cloud cost. Terraform provisions an AWS HTTPS entry point, networking, identity, compute, remote state, logs, alarms, and a monthly budget. Docker Compose runs three PostgreSQL databases, Kafka, Debezium, Eureka, the gateway, two Order command replicas, two query replicas, and one Inventory service on one eight-GiB EC2 instance.
+This deployment keeps the complete application topology intact while minimizing fixed cloud cost. Terraform provisions an AWS HTTPS entry point, networking, identity, compute, remote state, logs, alarms, and a monthly budget. Docker Compose runs three PostgreSQL databases, Kafka, Debezium, the gateway, two Order command replicas, two query replicas, and one Inventory service on one eight-GiB EC2 instance.
 
 Current public API: [https://n6jxpgtbrc.execute-api.eu-central-1.amazonaws.com/](https://n6jxpgtbrc.execute-api.eu-central-1.amazonaws.com/)
 
@@ -11,9 +11,8 @@ flowchart TB
 
     subgraph VPC[AWS VPC]
         subgraph Host[EC2 m7i-flex.large · encrypted gp3]
-            Gateway --> Registry[Eureka]
-            Gateway --> Commands[Command service ×2]
-            Gateway --> Queries[Query service ×2]
+            Gateway -->|Compose service DNS| Commands[Command service ×2]
+            Gateway -->|Compose service DNS| Queries[Query service ×2]
             Commands --> CommandDB[(Command PostgreSQL)]
             Kafka --> Inventory[Inventory service]
             Inventory --> InventoryDB[(Inventory PostgreSQL)]
@@ -36,7 +35,7 @@ flowchart TB
 
 The Inventory database and service have 256 MiB and 512 MiB container limits. The Free-plan-eligible, eight-GiB `m7i-flex.large` is the configured economical shape, but the complete single-host topology must be measured under representative load before treating it as a capacity baseline.
 
-This is a cost-optimized environment, not a claim of infrastructure high availability. It proves the same event sourcing, CDC, consumer idempotency, discovery, and replica behavior as the local topology. A production topology would place stateless services on ECS or EKS, use managed multi-AZ databases and Kafka, and run the registry redundantly or replace it with platform-native discovery.
+This is a cost-optimized environment, not a claim of infrastructure high availability. It proves the same event sourcing, CDC, consumer idempotency, platform DNS routing, and replica behavior as the local topology. A production topology would place stateless services on ECS or EKS and use their managed service routing with multi-AZ databases and Kafka.
 
 ## Cost boundary
 
@@ -77,7 +76,7 @@ The workflow checks out the exact tested revision, assumes the deployment role w
 
 Every container sends stdout and stderr to `/event-sourced-cqrs/cloud/containers` in CloudWatch Logs. API Gateway writes structured access logs to `/event-sourced-cqrs/cloud/api-gateway`. Both groups retain seven days. EC2 status checks have a CloudWatch alarm, and API Gateway limits the default route to 10 requests per second with a burst of 20.
 
-Only EC2 port 8080 accepts internet traffic. Database, Kafka, service, Eureka, Debezium, and management ports are not publicly reachable. Systems Manager provides the administrative channel; the security group deliberately has no SSH rule and the instance requires IMDSv2.
+Only EC2 port 8080 accepts internet traffic. Database, Kafka, backend service, Debezium, and management ports are not publicly reachable. Systems Manager provides the administrative channel; the security group deliberately has no SSH rule and the instance requires IMDSv2.
 
 Subsequent successful CI runs on `main` deploy automatically. A manual deployment is also available from the `Deploy to AWS` workflow.
 

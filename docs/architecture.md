@@ -2,13 +2,13 @@
 
 ## Context and goals
 
-This repository uses an order-and-inventory lifecycle to expose the mechanics of event-sourced CQRS and a choreographed saga. Each service owns its database, aggregate decisions derive from local history, cross-service transitions are visible as versioned events, and replicated services are reached through registry-backed routing.
+This repository uses an order-and-inventory lifecycle to expose the mechanics of event-sourced CQRS and a choreographed saga. Each service owns its database, aggregate decisions derive from local history, cross-service transitions are visible as versioned events, and replicated services are reached through deployment-platform service routing.
 
 The design favors explicit guarantees and local reproducibility. Event sourcing adds operational and modeling cost, so it should be selected where retaining business history, temporal reconstruction, auditability, or event-driven integration justifies that cost.
 
 ## User interface and service boundary
 
-The React order portal is a stateless client of the API gateway. It creates orders, retries a command with the same idempotency key, verifies conflicting-key rejection, waits for inventory confirmation, polls the eventually consistent read model, cancels an order, searches the customer projection, and verifies the independent serverless activity view. Browser and API clients use the same public origin: `/api` reaches Spring Cloud Gateway and `/serverless` reaches the read-only Azure Function through Caddy. The UI never reaches a database, Kafka, Debezium, Eureka, or a backend instance directly.
+The React order portal is a stateless client of the API gateway. It creates orders, retries a command with the same idempotency key, verifies conflicting-key rejection, waits for inventory confirmation, polls the eventually consistent read model, cancels an order, searches the customer projection, and verifies the independent serverless activity view. Browser and API clients use the same public origin: `/api` reaches Spring Cloud Gateway and `/serverless` reaches the read-only Azure Function through Caddy. The UI never reaches a database, Kafka, Debezium, or a backend instance directly.
 
 `customerId` is an identity boundary input to the order context, not a locally owned customer record. A Customer service would be appropriate when this system owns customer profiles, authentication, consent, addresses, or lifecycle rules and can define an independent bounded context. Adding one only to populate this portal would create a distributed join and another operational dependency without a separate business capability, so the compact architecture deliberately keeps customer identity external.
 
@@ -19,16 +19,13 @@ sequenceDiagram
     autonumber
     actor Client as React portal / API client
     participant G as API Gateway
-    participant R as Local Eureka Registry
     participant C as Command Service
     participant ES as Command DB / Event Store
     participant D as Debezium
     participant K as Kafka
 
-    C->>R: register instance + renew lease
-    G->>R: discover command instances
     Client->>G: POST /api/orders + Idempotency-Key
-    G->>C: load-balanced command + X-Correlation-ID
+    G->>C: command via platform service DNS + X-Correlation-ID
     C->>ES: BEGIN
     C->>ES: claim key + command fingerprint
     C->>ES: append OrderCreated.v1 at expected version 0
@@ -163,15 +160,17 @@ The cloud artifacts map the common service models to concrete ownership boundari
 
 Azure Functions is the Azure equivalent of the event-driven compute model associated with AWS Lambda. A second Lambda implementation would duplicate the same handler without adding another business boundary.
 
-## Server-side discovery and horizontal scaling
+## Platform service discovery and horizontal scaling
 
-External clients know only the gateway's stable address. Discovery is deployment-specific. In local Compose, Command, Inventory, and query instances self-register with Eureka and renew short-lived leases; the gateway resolves the command and query APIs through Spring Cloud LoadBalancer. In Azure K3s, the application pods disable Eureka, Kubernetes Services and EndpointSlices own discovery, and the gateway routes directly to the command and query Service DNS names. Inventory has no public route and participates only through Kafka in both environments.
+External clients know only the gateway's stable address. The gateway routes to stable service names supplied by the deployment platform: Docker Compose service DNS in local and AWS environments, and Kubernetes Services and DNS in Azure K3s. Inventory has no public route and participates only through Kafka in every environment.
 
-The default Compose topology and Azure Kubernetes application tier each run two command replicas and two query replicas. Compose assigns backend host ports dynamically and verifies failover after Eureka lease eviction. Kubernetes uses declarative replica ownership, readiness probes, rolling updates, and stable Services; deleting one pod demonstrates replacement and continued routing without a registry lease interval.
+The default Compose topology and Azure Kubernetes application tier each run two command replicas and two query replicas. Compose assigns backend host ports dynamically, removes stopped containers from the service DNS result, and verifies continued gateway traffic through a surviving replica. Kubernetes uses declarative replica ownership, readiness probes, rolling updates, and stable Services; deleting one pod demonstrates replacement and continued routing.
 
 Command replicas are stateless. PostgreSQL owns client idempotency claims, aggregate stream locks, expected versions, and the atomic event append. Query replicas share one Kafka consumer group, so partitions are assigned across the active consumers; the aggregate ID remains the Kafka key, preserving per-stream order. Every query replica reads the same query database, while the processed-event table and aggregate version make redelivery idempotent.
 
-The local registry uses short lease and eviction intervals and disables Eureka self-preservation so failover is deterministic and observable. Azure already follows the production direction of replacing application-level discovery with the deployment platform's native registry and load balancer. Its one-node K3s placement still does not provide infrastructure high availability.
+Compose DNS does not provide a separate health-aware application registry, so container health and the complete gateway path are checked independently before deployment and during the replica-failover smoke test. Kubernetes additionally removes unready endpoints from Services. Azure's one-node K3s placement still does not provide infrastructure high availability.
+
+[ADR-009](adr/009-platform-native-service-routing.md) records the shared platform-routing decision and its Compose failover trade-off.
 
 ## Event contract
 
@@ -230,8 +229,7 @@ The first saga rollout does not use Kafka retention as a migration boundary. Dep
 | Idempotency key reused with another payload | Stored fingerprint differs | Return `409 Conflict` without another event |
 | Concurrent cancellation retries | Metadata-row lock serializes replay and append | Only the first transition appends cancellation at the next version |
 | Attempted event update or delete | Database trigger aborts the statement | Correct with a compensating event, never history mutation |
-| One command or query replica stops | Compose waits for Eureka lease expiry; Kubernetes removes an unready endpoint and replaces the pod | Traffic continues through the surviving replica |
-| Registry unavailable after clients have cached instances | Existing cache can serve temporarily; topology changes are not discovered | Restore the registry; run it redundantly outside local development |
+| One command or query replica stops | Compose removes the stopped container from the running service set; Kubernetes removes an unready endpoint and replaces the pod | Traffic continues through the surviving replica |
 | Activity Function or Cosmos DB unavailable | The primary command and query paths continue; the affected activity partition pauses | The Kafka consumer group retries with exponential backoff until recovery; deterministic document IDs absorb redelivery |
 
 ## Cloud deployments and production path

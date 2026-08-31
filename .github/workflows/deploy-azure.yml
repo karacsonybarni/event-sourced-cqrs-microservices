@@ -290,8 +290,11 @@ jobs:
             exit 1
           fi
           sudo k3s kubectl --namespace cqrs-orders wait --for=condition=Available deployment --all --timeout=180s
-          if sudo k3s kubectl --namespace cqrs-orders get deployment discovery-server >/dev/null 2>&1; then
-            echo 'Eureka must not run in the Kubernetes application tier.' >&2
+          expected_deployments="\$(printf '%s\n' api-gateway edge-proxy frontend inventory-service order-command-service order-projection-worker order-query-service)"
+          actual_deployments="\$(sudo k3s kubectl --namespace cqrs-orders get deployments --output jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)"
+          if [[ "\${actual_deployments}" != "\${expected_deployments}" ]]; then
+            echo 'The Kubernetes application tier contains an unexpected Deployment set.' >&2
+            printf 'Expected:\n%s\nActual:\n%s\n' "\${expected_deployments}" "\${actual_deployments}" >&2
             exit 1
           fi
           printf 'KUBERNETES_DEPLOYMENT_VERIFIED\n'

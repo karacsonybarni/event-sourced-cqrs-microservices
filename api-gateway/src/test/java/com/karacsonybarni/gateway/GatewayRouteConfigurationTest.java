@@ -11,21 +11,21 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.cloud.gateway.route.RouteDefinition;
 import org.springframework.cloud.gateway.route.RouteDefinitionLocator;
 
-@SpringBootTest(properties = "eureka.client.enabled=false")
+@SpringBootTest
 class GatewayRouteConfigurationTest {
 
     @Autowired
     private RouteDefinitionLocator routeDefinitionLocator;
 
     @Test
-    void routesCommandsAndQueriesThroughServiceDiscovery() {
+    void routesCommandsAndQueriesToLocalServicesByDefault() {
         Map<String, URI> routeUris = routeDefinitionLocator.getRouteDefinitions()
                 .collectMap(RouteDefinition::getId, RouteDefinition::getUri)
                 .blockOptional()
                 .orElseThrow();
 
         assertThat(routeUris)
-                .containsEntry("order-commands", URI.create("lb://order-command-service"))
-                .containsEntry("order-queries", URI.create("lb://order-query-service"));
+                .containsEntry("order-commands", URI.create("http://localhost:8081"))
+                .containsEntry("order-queries", URI.create("http://localhost:8082"));
     }
 }
