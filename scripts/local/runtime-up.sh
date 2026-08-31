@@ -9,7 +9,7 @@ compose=(docker compose --profile ui)
 
 ./mvnw --batch-mode --no-transfer-progress -DskipTests package
 "${compose[@]}" build
-"${compose[@]}" up --no-build --detach --wait command-db
+"${compose[@]}" up --no-build --detach --wait --remove-orphans command-db
 
 activation_at="$(
   "${compose[@]}" exec --no-TTY command-db \

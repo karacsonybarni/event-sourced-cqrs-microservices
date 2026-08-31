@@ -274,7 +274,7 @@ jobs:
           remote_verification="$(cat <<REMOTE_SCRIPT
           set -eu
           expected_revision='${DEPLOY_REVISION}'
-          for deployment in order-command-service order-query-service inventory-service api-gateway frontend; do
+          for deployment in order-command-service order-projection-worker order-query-service inventory-service api-gateway frontend; do
             image="\$(sudo k3s kubectl --namespace cqrs-orders get "deployment/\${deployment}" --output jsonpath='{.spec.template.spec.containers[0].image}')"
             case "\${image}" in
               *:"\${expected_revision}") ;;
