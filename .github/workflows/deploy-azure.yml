@@ -83,7 +83,7 @@ jobs:
           ref: ${{ steps.freshness.outputs.revision }}
       - name: Configure short-lived Azure credentials
         if: steps.freshness.outputs.deploy == 'true'
-        uses: azure/login@v3.0.0
+        uses: azure/login@v3.0.2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
