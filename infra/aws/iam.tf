@@ -38,6 +38,22 @@ resource "aws_iam_role_policy" "instance_logs" {
   policy = data.aws_iam_policy_document.instance_logs.json
 }
 
+data "aws_iam_policy_document" "instance_gateway_origin" {
+  statement {
+    sid     = "RefreshApiGatewayOrigin"
+    actions = ["apigateway:PATCH"]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:apigateway:${var.aws_region}::/apis/${aws_apigatewayv2_api.platform.id}/integrations/${aws_apigatewayv2_integration.platform.id}",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "instance_gateway_origin" {
+  name   = "RefreshApiGatewayOrigin"
+  role   = aws_iam_role.instance.id
+  policy = data.aws_iam_policy_document.instance_gateway_origin.json
+}
+
 resource "aws_iam_instance_profile" "platform" {
   name = "${var.project_name}-${var.environment}"
   role = aws_iam_role.instance.name
