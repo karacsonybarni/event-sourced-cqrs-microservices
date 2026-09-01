@@ -10,6 +10,18 @@ installer="${download_directory}/install-k3s.sh"
 desired_config="${download_directory}/config.yaml"
 config_changed="false"
 
+wait_for_node_ready() {
+  for _ in {1..90}; do
+    if [[ -n "$(k3s kubectl get nodes --no-headers 2>/dev/null || true)" ]]; then
+      k3s kubectl wait --for=condition=Ready node --all --timeout=180s
+      return
+    fi
+    sleep 2
+  done
+  echo "K3s did not register a node in time." >&2
+  return 1
+}
+
 wait_for_local_path_provisioner() {
   for _ in {1..60}; do
     if k3s kubectl --namespace kube-system get deployment/local-path-provisioner >/dev/null 2>&1; then
@@ -46,7 +58,7 @@ if command -v k3s >/dev/null && k3s --version | grep --fixed-strings --quiet "${
   else
     systemctl start k3s
   fi
-  k3s kubectl wait --for=condition=Ready node --all --timeout=180s
+  wait_for_node_ready
   wait_for_local_path_provisioner
   exit 0
 fi
@@ -58,5 +70,5 @@ printf '%s  %s\n' "${installer_sha256}" "${installer}" | sha256sum --check
 
 INSTALL_K3S_VERSION="${k3s_version}" sh "${installer}"
 systemctl enable --now k3s
-k3s kubectl wait --for=condition=Ready node --all --timeout=180s
+wait_for_node_ready
 wait_for_local_path_provisioner
