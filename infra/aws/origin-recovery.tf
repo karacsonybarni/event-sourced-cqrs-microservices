@@ -70,7 +70,6 @@ resource "aws_ssm_association" "gateway_origin_refresh" {
       "chmod 0644 /etc/systemd/system/event-sourced-cqrs-origin-refresh.service",
       "systemctl daemon-reload",
       "systemctl enable event-sourced-cqrs-origin-refresh.service",
-      "systemctl restart event-sourced-cqrs-origin-refresh.service",
     ])
     executionTimeout = "420"
   }
