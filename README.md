@@ -7,6 +7,11 @@
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk)](https://adoptium.net/)
 [![Debezium](https://img.shields.io/badge/Debezium-3.6.1.Final-2C4F7C)](https://debezium.io/)
 
+## Live deployments
+
+- **Azure:** [React order portal and public API](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
+- **AWS:** [Public API](https://n6jxpgtbrc.execute-api.eu-central-1.amazonaws.com/)
+
 A runnable reference architecture combining a React customer portal, Command Query Responsibility Segregation (CQRS), selective event sourcing, a choreographed Order–Inventory saga, Debezium change data capture, horizontal scaling, and a Kubernetes-managed Azure application tier. Order and inventory-reservation lifecycles are immutable event streams, Debezium publishes committed inserts to Kafka, an independently deployable projection worker builds the disposable read model, and replicated query services serve it.
 
 The design follows the pattern language at [microservices.io](https://microservices.io/patterns/microservices.html), especially [Event Sourcing](https://microservices.io/patterns/data/event-sourcing.html), [Saga](https://microservices.io/patterns/data/saga.html), [CQRS](https://microservices.io/patterns/data/cqrs.html), [Database per Service](https://microservices.io/patterns/data/database-per-service.html), [API Gateway](https://microservices.io/patterns/apigateway.html), and [Idempotent Consumer](https://microservices.io/patterns/communication-style/idempotent-consumer.html).
