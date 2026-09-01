@@ -104,11 +104,12 @@ jobs:
         env:
           INSTANCE_ID: ${{ steps.host.outputs.instance_id }}
         run: |
+          remote_command="sudo cloud-init status --wait || exit 1; for attempt in \$(seq 1 180); do state=\$(sudo systemctl show --property=ActiveState --value event-sourced-cqrs.service 2>/dev/null || true); if [ \"\${state}\" != activating ]; then break; fi; echo 'Waiting for the EC2 boot deployment to finish'; sleep 10; done; if [ \"\${state:-unknown}\" = activating ]; then echo 'The EC2 boot deployment did not finish before the deployment timeout' >&2; exit 1; fi; sudo /usr/local/bin/deploy-event-sourced-cqrs ${DEPLOY_REVISION}"
           command_id="$(aws ssm send-command \
             --instance-ids "${INSTANCE_ID}" \
             --document-name AWS-RunShellScript \
             --comment "Deploy ${DEPLOY_REVISION}" \
-            --parameters "commands=sudo cloud-init status --wait && sudo /usr/local/bin/deploy-event-sourced-cqrs ${DEPLOY_REVISION}" \
+            --parameters "commands=${remote_command}" \
             --query 'Command.CommandId' \
             --output text)"
 
@@ -139,4 +140,9 @@ jobs:
         env:
           GATEWAY_URL: ${{ vars.PUBLIC_API_URL }}
           VERIFY_PLATFORM: "false"
-        run: ./scripts/smoke-test.sh
+        run: |
+          if [[ -z "${GATEWAY_URL}" || ! "${GATEWAY_URL}" =~ ^https://[A-Za-z0-9-]+\.execute-api\.${AWS_REGION}\.amazonaws\.com/?$ ]]; then
+            echo "PUBLIC_API_URL must be the AWS API Gateway endpoint for ${AWS_REGION}; got: ${GATEWAY_URL:-<unset>}" >&2
+            exit 1
+          fi
+          ./scripts/smoke-test.sh
