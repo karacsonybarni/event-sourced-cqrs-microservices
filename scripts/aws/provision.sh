@@ -5,7 +5,6 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 aws_region="${AWS_REGION:-eu-central-1}"
 github_repository="${GITHUB_REPOSITORY:-karacsonybarni/event-sourced-cqrs-microservices}"
 github_environment="${GITHUB_ENVIRONMENT:-cloud}"
-project_name="${PROJECT_NAME:-event-sourced-cqrs}"
 terraform_apply_arguments=()
 
 if [[ "${AUTO_APPROVE:-false}" == "true" ]]; then
@@ -22,7 +21,6 @@ done
 aws sts get-caller-identity >/dev/null
 gh auth status --hostname github.com >/dev/null
 
-aws_account_id="$(aws sts get-caller-identity --query Account --output text)"
 github_repository_owner_id="$(gh api "repos/${github_repository}" --jq '.owner.id')"
 github_repository_id="$(gh api "repos/${github_repository}" --jq '.id')"
 
@@ -42,19 +40,13 @@ verify_aws_service_access "Amazon S3" aws s3api list-buckets --max-items 1
 verify_aws_service_access "Amazon EC2 in ${aws_region}" \
   aws ec2 describe-regions --region "${aws_region}" --region-names "${aws_region}"
 
-state_bucket="${project_name}-${aws_account_id}-tfstate"
-if aws s3api head-bucket --bucket "${state_bucket}" >/dev/null 2>&1; then
-  printf 'Reusing existing Terraform state bucket %s\n' "${state_bucket}"
-else
-  terraform -chdir="${repository_root}/infra/aws/bootstrap" init -input=false
-  terraform -chdir="${repository_root}/infra/aws/bootstrap" apply \
-    -input=false \
-    -var "aws_region=${aws_region}" \
-    -var "project_name=${project_name}" \
-    "${terraform_apply_arguments[@]}"
+terraform -chdir="${repository_root}/infra/aws/bootstrap" init -input=false
+terraform -chdir="${repository_root}/infra/aws/bootstrap" apply \
+  -input=false \
+  -var "aws_region=${aws_region}" \
+  "${terraform_apply_arguments[@]}"
 
-  state_bucket="$(terraform -chdir="${repository_root}/infra/aws/bootstrap" output -raw state_bucket_name)"
-fi
+state_bucket="$(terraform -chdir="${repository_root}/infra/aws/bootstrap" output -raw state_bucket_name)"
 
 terraform -chdir="${repository_root}/infra/aws" init \
   -input=false \
@@ -65,7 +57,6 @@ terraform -chdir="${repository_root}/infra/aws" init \
 main_apply_arguments=(
   -input=false
   -var "aws_region=${aws_region}"
-  -var "project_name=${project_name}"
   -var "github_repository=${github_repository}"
   -var "github_repository_owner_id=${github_repository_owner_id}"
   -var "github_repository_id=${github_repository_id}"
@@ -75,7 +66,7 @@ if [[ -n "${BUDGET_ALERT_EMAIL:-}" ]]; then
   main_apply_arguments+=("-var" "budget_alert_email=${BUDGET_ALERT_EMAIL}")
 fi
 if [[ -n "${GITHUB_OIDC_PROVIDER_ARN:-}" ]]; then
-  main_apply_arguments+=("-var" "github_oidc_provider_arn=${GITHUB_OIDC_PROVIDER_ARN}")
+  main_apply_arguments+=("-var" "github_oidc_provider_arn=${GITHUB_OIDC_PROVIDER_ARN")
 fi
 main_apply_arguments+=("${terraform_apply_arguments[@]}")
 
@@ -89,6 +80,7 @@ gh api \
   -F use_immutable_subject=true \
   --silent
 
+aws_account_id="$(terraform -chdir="${repository_root}/infra/aws" output -raw aws_account_id)"
 deployment_role_arn="$(terraform -chdir="${repository_root}/infra/aws" output -raw deployment_role_arn)"
 instance_id="$(terraform -chdir="${repository_root}/infra/aws" output -raw instance_id)"
 public_api_url="$(terraform -chdir="${repository_root}/infra/aws" output -raw public_api_url)"
