@@ -69,7 +69,7 @@ jobs:
       - name: Verify Kubernetes owns the AWS application tier
         run: |
           set -Eeuo pipefail
-          remote_command="cd /opt/event-sourced-cqrs && sudo ./scripts/aws/verify-kubernetes-runtime.sh ${DEPLOY_REVISION}"
+          remote_command="cd /opt/event-sourced-cqrs && sudo bash ./scripts/aws/verify-kubernetes-runtime.sh ${DEPLOY_REVISION}"
           parameters="$(jq -cn --arg command "${remote_command}" '{commands:[$command]}')"
           command_id="$(aws ssm send-command \
             --instance-ids "${INSTANCE_ID}" \
