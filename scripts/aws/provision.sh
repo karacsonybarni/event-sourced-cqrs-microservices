@@ -66,7 +66,7 @@ if [[ -n "${BUDGET_ALERT_EMAIL:-}" ]]; then
   main_apply_arguments+=("-var" "budget_alert_email=${BUDGET_ALERT_EMAIL}")
 fi
 if [[ -n "${GITHUB_OIDC_PROVIDER_ARN:-}" ]]; then
-  main_apply_arguments+=("-var" "github_oidc_provider_arn=${GITHUB_OIDC_PROVIDER_ARN")
+  main_apply_arguments+=("-var" "github_oidc_provider_arn=${GITHUB_OIDC_PROVIDER_ARN}")
 fi
 main_apply_arguments+=("${terraform_apply_arguments[@]}")
 
