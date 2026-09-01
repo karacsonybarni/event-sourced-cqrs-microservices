@@ -1,4 +1,7 @@
 * text=auto
 *.cmd text eol=crlf
 *.sh text eol=lf
+*.tf text eol=lf
+*.tfvars text eol=lf
+*.tftpl text eol=lf
 mvnw text eol=lf
