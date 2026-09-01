@@ -85,7 +85,7 @@ mapfile -t destructive_changes < <(
   grep -E '^  # .* (will be destroyed|must be replaced)$' <<<"${plan_text}" || true
 )
 for destructive_change in "${destructive_changes[@]}"; do
-  if [[ "${destructive_change}" != "  # aws_ssm_association.gateway_origin_refresh must be replaced" ]]; then
+  if [[ ! "${destructive_change}" =~ ^\ \ #\ aws_ssm_association\.gateway_origin_refresh\ (is\ tainted,\ so\ )?must\ be\ replaced$ ]]; then
     echo "Safety check failed: unexpected destructive Terraform action:" >&2
     echo "${destructive_change}" >&2
     echo "Only replacement of aws_ssm_association.gateway_origin_refresh is permitted." >&2
@@ -94,7 +94,7 @@ for destructive_change in "${destructive_changes[@]}"; do
 done
 
 if grep -Eq 'Plan: .* [1-9][0-9]* to destroy' <<<"${plan_text}"; then
-  if [[ "${#destructive_changes[@]}" -ne 1 || "${destructive_changes[0]}" != "  # aws_ssm_association.gateway_origin_refresh must be replaced" ]]; then
+  if [[ "${#destructive_changes[@]}" -ne 1 || ! "${destructive_changes[0]}" =~ ^\ \ #\ aws_ssm_association\.gateway_origin_refresh\ (is\ tainted,\ so\ )?must\ be\ replaced$ ]]; then
     echo "Safety check failed: Terraform reports destroy actions that were not uniquely identified as the expected SSM association replacement." >&2
     exit 1
   fi
