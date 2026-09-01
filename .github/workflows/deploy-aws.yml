@@ -95,6 +95,7 @@ jobs:
               echo "instance_id=${candidate}" >> "${GITHUB_OUTPUT}"
               exit 0
             fi
+            echo "Identity probe for ${candidate} ended with ${status} after ${attempt} checks." >&2
           done
 
           echo 'No online Systems Manager node could be verified as the Terraform-managed deployment host.' >&2
