@@ -37,7 +37,7 @@ locals {
     exit 1
   SCRIPT
 
-  gateway_origin_refresh_unit = <<-UNIT
+  gateway_origin_refresh_unit   = <<-UNIT
     [Unit]
     Description=Refresh API Gateway origin after EC2 address changes
     After=network-online.target
