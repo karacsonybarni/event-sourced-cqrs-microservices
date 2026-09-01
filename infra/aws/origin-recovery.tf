@@ -64,11 +64,13 @@ resource "aws_ssm_association" "gateway_origin_refresh" {
 
   parameters = {
     commands = join("\n", [
-      "printf '%s' '${base64encode(local.gateway_origin_refresh_script)}' | base64 --decode > /usr/local/bin/refresh-event-sourced-cqrs-origin",
+      "systemctl stop event-sourced-cqrs-origin-refresh.service || true",
+      "printf '%s' '${base64encode(local.gateway_origin_refresh_script)}' | base64 --decode | tr -d '\\r' > /usr/local/bin/refresh-event-sourced-cqrs-origin",
       "chmod 0755 /usr/local/bin/refresh-event-sourced-cqrs-origin",
-      "printf '%s' '${base64encode(local.gateway_origin_refresh_unit)}' | base64 --decode > /etc/systemd/system/event-sourced-cqrs-origin-refresh.service",
+      "printf '%s' '${base64encode(local.gateway_origin_refresh_unit)}' | base64 --decode | tr -d '\\r' > /etc/systemd/system/event-sourced-cqrs-origin-refresh.service",
       "chmod 0644 /etc/systemd/system/event-sourced-cqrs-origin-refresh.service",
       "systemctl daemon-reload",
+      "systemctl reset-failed event-sourced-cqrs-origin-refresh.service || true",
       "systemctl enable event-sourced-cqrs-origin-refresh.service",
     ])
     executionTimeout = "420"
