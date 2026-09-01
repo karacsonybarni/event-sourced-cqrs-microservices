@@ -53,7 +53,7 @@ if [[ ! "${deployment_revision}" =~ ^[0-9a-f]{40}$ ]]; then
   exit 1
 fi
 
-./scripts/aws/install-k3s.sh
+bash ./scripts/aws/install-k3s.sh
 
 export PLATFORM_HOST="${platform_host}"
 export KAFKA_NODE_HOST="${platform_host}"
@@ -184,6 +184,8 @@ for attempt in {1..60}; do
   fi
   sleep 2
 done
+
+bash ./scripts/aws/verify-kubernetes-runtime.sh "${deployment_revision}"
 
 "${compose[@]}" run --rm --no-deps debezium-init
 
