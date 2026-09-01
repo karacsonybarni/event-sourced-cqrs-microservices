@@ -161,3 +161,7 @@ jobs:
           GATEWAY_URL: ${{ needs.config.outputs.public_api_url }}
           VERIFY_PLATFORM: "false"
         run: ./scripts/smoke-test.sh
+      - name: Verify the public React UI
+        env:
+          UI_URL: ${{ needs.config.outputs.public_api_url }}
+        run: ./scripts/ui-smoke-test.sh
