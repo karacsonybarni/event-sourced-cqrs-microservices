@@ -15,17 +15,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  config:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main' &&
        vars.AWS_DEPLOY_ENABLED == 'true')
     runs-on: ubuntu-latest
+    outputs:
+      public_api_url: ${{ steps.endpoint.outputs.public_api_url }}
+    steps:
+      - name: Resolve repository-scoped AWS endpoint
+        id: endpoint
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "${PUBLIC_API_URL}" || ! "${PUBLIC_API_URL}" =~ ^https://[A-Za-z0-9-]+\.execute-api\.${AWS_REGION}\.amazonaws\.com/?$ ]]; then
+            echo "Repository PUBLIC_API_URL must be the AWS API Gateway endpoint for ${AWS_REGION}; got: ${PUBLIC_API_URL:-<unset>}" >&2
+            exit 1
+          fi
+          echo "public_api_url=${PUBLIC_API_URL}" >> "${GITHUB_OUTPUT}"
+
+  deploy:
+    needs: config
+    if: needs.config.result == 'success'
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
       name: cloud
-      url: ${{ vars.PUBLIC_API_URL }}
+      url: ${{ needs.config.outputs.public_api_url }}
     env:
       DEPLOY_REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
@@ -139,11 +159,6 @@ jobs:
           fi
       - name: Verify the public event-sourced CQRS flow
         env:
-          GATEWAY_URL: ${{ vars.PUBLIC_API_URL }}
+          GATEWAY_URL: ${{ needs.config.outputs.public_api_url }}
           VERIFY_PLATFORM: "false"
-        run: |
-          if [[ -z "${GATEWAY_URL}" || ! "${GATEWAY_URL}" =~ ^https://[A-Za-z0-9-]+\.execute-api\.${AWS_REGION}\.amazonaws\.com/?$ ]]; then
-            echo "PUBLIC_API_URL must be the AWS API Gateway endpoint for ${AWS_REGION}; got: ${GATEWAY_URL:-<unset>}" >&2
-            exit 1
-          fi
-          ./scripts/smoke-test.sh
+        run: ./scripts/smoke-test.sh
