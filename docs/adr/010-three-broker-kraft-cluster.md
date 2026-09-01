@@ -24,6 +24,6 @@ The acceptance test stops the current leader of `orders.events.v1` partition 0, 
 - One broker process can stop while replicated topics continue reads and durable writes through the remaining ISR.
 - Stable named volumes preserve broker metadata and logs across ordinary Compose shutdown and recreation.
 - The initial migration has a controlled Kafka/Connect outage so the source log tree is copied from a consistent stopped broker. Identity, feature-level, copy, observer, reassignment, and ISR mismatches stop migration rather than resetting data.
-- RF3 consumes approximately three times the retained Kafka log storage plus replication overhead.
+- RF3 consumes approximately three times the retained Kafka log storage plus replication overhead. The migration deliberately retains the previous anonymous source volume for recovery, temporarily increasing the cutover footprint to roughly four log copies until a separately approved cleanup retires it.
 - The three broker limits total 1.875 GiB. Compared with the former one-GiB broker limit, the 875 MiB cap increase fits inside the measured 2.76 GiB Azure headroom, but the VM has no swap and remains capacity constrained.
 - Combined roles and same-host placement are demo compromises. A critical production deployment should separate broker and controller roles and distribute processes, storage, and network paths across independent failure domains.

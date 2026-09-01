@@ -36,8 +36,8 @@ partition_description="$(
     /opt/kafka/bin/kafka-topics.sh \
       --bootstrap-server "${bootstrap_servers}" \
       --describe \
-      --topic orders.events.v1 \
-      --partition 0
+      --topic orders.events.v1 |
+    awk '$0 ~ /Partition: 0([[:space:]]|$)/ { print; exit }'
 )"
 leader_node="$(sed -n 's/.*Leader: \([0-9][0-9]*\).*/\1/p' <<<"${partition_description}")"
 leader_service="$(service_for_node "${leader_node}")"
@@ -58,8 +58,8 @@ for _ in {1..60}; do
       /opt/kafka/bin/kafka-topics.sh \
         --bootstrap-server "${bootstrap_servers}" \
         --describe \
-        --topic orders.events.v1 \
-        --partition 0 2>/dev/null || true
+        --topic orders.events.v1 2>/dev/null |
+      awk '$0 ~ /Partition: 0([[:space:]]|$)/ { print; exit }' || true
   )"
   replacement_leader="$(sed -n 's/.*Leader: \([0-9][0-9]*\).*/\1/p' <<<"${description}")"
   isr="$(sed -n 's/.*Isr: \([^[:space:]]*\).*/\1/p' <<<"${description}")"

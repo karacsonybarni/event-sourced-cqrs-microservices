@@ -35,13 +35,48 @@ fi
 
 staging_directory="$(mktemp -d)"
 server_config="$(mktemp)"
+kafka_was_running="$(docker inspect --format '{{.State.Running}}' "${kafka_container}")"
+connect_container="$("${compose[@]}" ps --all --quiet debezium 2>/dev/null || true)"
+connect_was_running=false
+if [[ -n "${connect_container}" ]]; then
+  connect_was_running="$(docker inspect --format '{{.State.Running}}' "${connect_container}")"
+fi
+migration_complete=false
 cleanup() {
+  exit_status=$?
+  trap - EXIT
+  set +e
   rm -f "${server_config}"
   rm -rf "${staging_directory}"
+
+  if [[ "${migration_complete}" != "true" ]]; then
+    echo "Kafka storage adoption did not complete; restoring the original container state." >&2
+    if [[ "${kafka_was_running}" == "true" ]]; then
+      docker start "${kafka_container}" >/dev/null
+      kafka_restored=false
+      for _ in {1..60}; do
+        if docker exec "${kafka_container}" /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+          kafka_restored=true
+          break
+        fi
+        sleep 2
+      done
+      if [[ "${kafka_restored}" != "true" ]]; then
+        echo "Original Kafka container did not return to readiness within two minutes." >&2
+      fi
+    else
+      docker stop --time 60 "${kafka_container}" >/dev/null 2>&1 || true
+    fi
+    if [[ "${connect_was_running}" == "true" ]]; then
+      docker start "${connect_container}" >/dev/null
+    fi
+  fi
+  exit "${exit_status}"
 }
 trap cleanup EXIT
 
-if [[ "$(docker inspect --format '{{.State.Running}}' "${kafka_container}")" != "true" ]]; then
+if [[ "${kafka_was_running}" != "true" ]]; then
   docker start "${kafka_container}" >/dev/null
 fi
 
@@ -97,8 +132,7 @@ if [[ -z "${log_directories}" || "${log_directories}" == *,* ]]; then
   exit 1
 fi
 
-connect_container="$("${compose[@]}" ps --all --quiet debezium 2>/dev/null || true)"
-if [[ -n "${connect_container}" && "$(docker inspect --format '{{.State.Running}}' "${connect_container}")" == "true" ]]; then
+if [[ "${connect_was_running}" == "true" ]]; then
   docker stop --time 60 "${connect_container}" >/dev/null
 fi
 docker stop --time 60 "${kafka_container}" >/dev/null
@@ -158,5 +192,6 @@ docker run --rm --user root \
       <(cd /target && find . -printf "%P\t%y\t%m\t%U\t%G\t%s\n" | sort)
   '
 
+migration_complete=true
 echo "Kafka cluster ${source_cluster_id} was copied from ${log_directories} to stable volume ${stable_volume}."
 echo "The old stopped container remains available until the next Compose reconciliation."
