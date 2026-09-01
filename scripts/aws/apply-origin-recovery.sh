@@ -37,6 +37,27 @@ terraform -chdir="${repository_root}/infra/aws" init \
   -backend-config="bucket=${state_bucket}" \
   -backend-config="region=${aws_region}"
 
+instance_id="$(terraform -chdir="${repository_root}/infra/aws" output -raw instance_id)"
+public_api_url="$(terraform -chdir="${repository_root}/infra/aws" output -raw public_api_url)"
+
+printf 'Waiting for Terraform-managed instance %s to become available in Systems Manager...\n' "${instance_id}"
+ping_status=""
+for attempt in $(seq 1 60); do
+  ping_status="$(aws ssm describe-instance-information \
+    --region "${aws_region}" \
+    --filters "Key=InstanceIds,Values=${instance_id}" \
+    --query 'InstanceInformationList[0].PingStatus' \
+    --output text 2>/dev/null || true)"
+  if [[ "${ping_status}" == "Online" ]]; then
+    break
+  fi
+  sleep 5
+done
+if [[ "${ping_status}" != "Online" ]]; then
+  echo "Instance ${instance_id} is not Online in Systems Manager after ${attempt} checks (status: ${ping_status:-unknown})." >&2
+  exit 1
+fi
+
 rm -f "${repository_root}/infra/aws/${plan_file}"
 trap 'rm -f "${repository_root}/infra/aws/${plan_file}"' EXIT
 
@@ -49,15 +70,28 @@ terraform -chdir="${repository_root}/infra/aws" plan \
   -var "github_repository_id=${repository_id}" \
   -var "github_environment=${github_environment}" \
   -target=aws_iam_role_policy.instance_gateway_origin \
+  -target=aws_iam_role_policy.github_deploy \
   -target=aws_ssm_association.gateway_origin_refresh \
   -out="${plan_file}"
+
+plan_text="$(terraform -chdir="${repository_root}/infra/aws" show -no-color "${plan_file}")"
+if grep -q 'aws_instance\.platform' <<<"${plan_text}"; then
+  echo "Safety check failed: the origin-recovery plan contains aws_instance.platform." >&2
+  echo "Refusing to modify or replace the EC2 host." >&2
+  exit 1
+fi
+if grep -Eq 'Plan: .* [1-9][0-9]* to destroy' <<<"${plan_text}"; then
+  echo "Safety check failed: the origin-recovery plan contains destroy actions." >&2
+  echo "Refusing to apply a destructive maintenance plan." >&2
+  exit 1
+fi
 
 terraform -chdir="${repository_root}/infra/aws" apply \
   -input=false \
   "${plan_file}"
 
-instance_id="$(terraform -chdir="${repository_root}/infra/aws" output -raw instance_id)"
-public_api_url="$(terraform -chdir="${repository_root}/infra/aws" output -raw public_api_url)"
+gh variable set AWS_INSTANCE_ID --repo "${github_repository}" --body "${instance_id}"
+
 public_dns="$(aws ec2 describe-instances \
   --instance-ids "${instance_id}" \
   --region "${aws_region}" \
@@ -92,6 +126,7 @@ if [[ "${integration_uri}" != "${expected_uri}" ]]; then
 fi
 
 printf 'Origin recovery installed and API Gateway points to %s\n' "${expected_uri}"
+printf 'GitHub AWS_INSTANCE_ID updated to %s\n' "${instance_id}"
 printf 'Public API remains %s\n' "${public_api_url}"
 
 gh workflow run deploy-aws.yml --repo "${github_repository}" --ref main
