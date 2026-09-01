@@ -21,6 +21,7 @@ cd "${repository_root}"
 
 compose=(
   docker compose
+  --profile ui
   --env-file "${runtime_environment}"
   --file compose.yml
   --file compose.cloud.yml
@@ -51,6 +52,8 @@ EXPECTED_COMMAND_INSTANCES=2 \
 EXPECTED_QUERY_INSTANCES=2 \
 EXPECTED_INVENTORY_INSTANCES=1 \
   ./scripts/smoke-test.sh
+
+UI_URL=http://localhost:8080 ./scripts/ui-smoke-test.sh
 
 for connector_name in order-events inventory-events; do
   connector_status="$(curl --fail --silent "http://localhost:8083/connectors/${connector_name}/status")"

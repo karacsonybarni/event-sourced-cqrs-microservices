@@ -129,7 +129,6 @@ services:
     environment:
       MANAGEMENT_SERVER_PORT: 9080
     ports: !override
-      - "0.0.0.0:8080:8080"
       - "127.0.0.1:9080:9080"
     mem_limit: 640m
     healthcheck:
@@ -146,7 +145,8 @@ services:
         tag: "{{.Name}}"
 
   frontend:
-    ports: !reset []
+    ports: !override
+      - "0.0.0.0:8080:80"
     mem_limit: 96m
     logging:
       driver: awslogs
