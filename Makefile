@@ -1,4 +1,4 @@
-.PHONY: build test up down smoke ui-smoke scale-smoke kubernetes-validate cloud-config cloud-provision cloud-destroy logs clean
+.PHONY: build test up down smoke ui-smoke scale-smoke kafka-failover kubernetes-validate cloud-config cloud-provision cloud-destroy logs clean
 
 build:
 	./mvnw clean verify
@@ -21,6 +21,9 @@ ui-smoke:
 
 scale-smoke:
 	./scripts/scaling-test.sh
+
+kafka-failover:
+	./scripts/kafka-broker-failover-test.sh --profile ui
 
 kubernetes-validate:
 	./scripts/validate-kubernetes.sh

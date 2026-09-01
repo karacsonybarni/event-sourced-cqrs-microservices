@@ -7,9 +7,10 @@ cd "${repository_root}"
 
 compose=(docker compose --profile ui)
 
+./scripts/kafka/prepare-storage.sh --profile ui
 ./mvnw --batch-mode --no-transfer-progress -DskipTests package
-"${compose[@]}" build
-"${compose[@]}" up --no-build --detach --wait --remove-orphans command-db
+COMPOSE_PARALLEL_LIMIT=1 "${compose[@]}" build
+"${compose[@]}" up --no-build --detach --wait --wait-timeout 600 --remove-orphans command-db
 
 activation_at="$(
   "${compose[@]}" exec --no-TTY command-db \
@@ -28,7 +29,7 @@ if [[ -z "${activation_at}" ]]; then
 fi
 
 SAGA_ACTIVATION_AT="${activation_at}" \
-  "${compose[@]}" up --no-build --detach --wait \
+  "${compose[@]}" up --no-build --detach --wait --wait-timeout 600 \
   --scale order-command-service=2 \
   --scale order-query-service=2
 

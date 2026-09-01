@@ -37,7 +37,27 @@ services:
 
   kafka:
     ports: !reset []
-    mem_limit: 1g
+    mem_limit: 640m
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        tag: "{{.Name}}"
+
+  kafka-2:
+    ports: !reset []
+    mem_limit: 640m
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${AWS_REGION:?Set AWS_REGION}"
+        awslogs-group: "${CLOUDWATCH_LOG_GROUP:?Set CLOUDWATCH_LOG_GROUP}"
+        tag: "{{.Name}}"
+
+  kafka-3:
+    ports: !reset []
+    mem_limit: 640m
     logging:
       driver: awslogs
       options:

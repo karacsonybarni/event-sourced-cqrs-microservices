@@ -26,7 +26,7 @@ flowchart LR
 
     Command -->|append in one ACID transaction| EventStore[(Command PostgreSQL<br/>append-only event store)]
     EventStore -->|logical replication / WAL| Debezium[Debezium<br/>PostgreSQL connector]
-    Debezium -->|versioned envelope<br/>keyed by orderId| Kafka{{Apache Kafka}}
+    Debezium -->|versioned envelope<br/>keyed by orderId| Kafka{{Apache Kafka<br/>3-node KRaft cluster}}
     Kafka -->|OrderCreated / OrderCancelled| Inventory
     Inventory -->|lock and adjust| InventoryDB[(Inventory PostgreSQL<br/>stock + reservation events)]
     InventoryDB -->|logical replication / WAL| Debezium
@@ -63,7 +63,7 @@ make smoke
 make ui-smoke
 ```
 
-`make up` compiles the services, builds the React application, starts three PostgreSQL databases, Kafka, Debezium, the gateway, Inventory, the order portal, one projection worker, two command-service replicas, and two query-service replicas, registers both CDC connectors idempotently, and waits for health checks. Compose service DNS connects the gateway to the replicated command and query services. Open [http://localhost:3000](http://localhost:3000) or run `make ui-smoke` to verify the local UI. `make smoke` proves this flow through the gateway:
+`make up` compiles the services, builds the React application, starts three PostgreSQL databases, a three-node Kafka 4.3.1 KRaft cluster, Debezium, the gateway, Inventory, the order portal, one projection worker, two command-service replicas, and two query-service replicas, registers both CDC connectors idempotently, and waits for health checks. Compose service DNS connects the gateway to the replicated command and query services. Open [http://localhost:3000](http://localhost:3000) or run `make ui-smoke` to verify the local UI. `make smoke` proves this flow through the gateway:
 
 1. create an order;
 2. repeat the same command and verify idempotent replay;
@@ -79,13 +79,17 @@ The Azure image enables an additional portal proof that independently verifies t
 
 `make scale-smoke` then stops every command and query replica in turn. It verifies that Compose removes the stopped container from the running service set and that the gateway continues routing commands and queries through platform DNS to the surviving replica before restoring the full topology. The projection worker is independent of that HTTP replica test.
 
+`make kafka-failover` selects the current leader of `orders.events.v1` partition 0, stops that broker, runs the complete Order–Inventory saga and query-projection smoke test through the remaining brokers, restores the broker, and requires every application, Connect, consumer-offset, and transaction-state partition to return to ISR 3. The three combined broker/controller nodes demonstrate replication, leader election, and recovery. They share one machine and therefore do not provide host or failure-domain high availability; critical production deployments should separate broker/controller roles and distribute them across independent failure domains.
+
 The Maven reactor also packages `order-activity-function`, a Java 21 Azure Function that consumes the same Kafka event contract and writes an idempotent document projection to Azure Cosmos DB. The Azure deployment places it on Flex Consumption with private virtual-network access to Kafka, managed-identity access to Cosmos DB, and a read-only same-origin activity route. It remains an independent cloud extension rather than a dependency of the local order path. See [ADR-005](docs/adr/005-serverless-nosql-activity-projection.md) for its boundary and deployment trade-offs.
 
-Stop the stack and remove its local volumes with:
+Stop the stack while retaining PostgreSQL and Kafka volumes with:
 
 ```bash
 make down
 ```
+
+Kafka clients inside Compose use `kafka:9092,kafka-2:9092,kafka-3:9092`; host-side clients use `localhost:19092,localhost:29092,localhost:39092`. Spring and Debezium producer configuration uses `acks=all`, and the six application/DLT topics plus Kafka Connect and Kafka internal topics use replication factor 3 with `min.insync.replicas=2`.
 
 ## Deploy to Azure
 
@@ -93,7 +97,7 @@ The repository includes a credit-protected Azure deployment with Terraform, Azur
 
 Live React order portal and public API: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
 
-See [Azure cloud deployment](docs/azure-deployment.md) for the architecture, provisioning command, Kubernetes boundary, security model, cost boundary, delivery flow, operations, and teardown procedure. [ADR-004](docs/adr/004-credit-protected-azure-deployment.md) records why the complete topology uses promotional credit on one 8-GiB VM instead of the undersized 12-month free VM shapes; [ADR-007](docs/adr/007-incremental-kubernetes-application-tier.md) records the incremental Kubernetes migration and its production boundary; [ADR-008](docs/adr/008-independent-cqrs-projection-worker.md) records the query/projection runtime split.
+See [Azure cloud deployment](docs/azure-deployment.md) for the architecture, provisioning command, Kubernetes boundary, security model, cost boundary, delivery flow, operations, and teardown procedure. [ADR-004](docs/adr/004-credit-protected-azure-deployment.md) records why the complete topology uses promotional credit on one 8-GiB VM instead of the undersized 12-month free VM shapes; [ADR-007](docs/adr/007-incremental-kubernetes-application-tier.md) records the incremental Kubernetes migration and its production boundary; [ADR-008](docs/adr/008-independent-cqrs-projection-worker.md) records the query/projection runtime split; and [ADR-010](docs/adr/010-three-broker-kraft-cluster.md) records the Kafka replication and same-host boundary.
 
 ## Preserved AWS deployment
 
@@ -171,6 +175,7 @@ make kubernetes-validate
 make up
 make smoke
 make scale-smoke
+make kafka-failover
 GATEWAY_URL=https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com ./scripts/serverless-smoke-test.sh
 ```
 
@@ -205,6 +210,7 @@ order-projection-worker/   Kafka-to-query-PostgreSQL projection worker
 order-query-service/       read-only CQRS query API
 order-activity-function/   serverless Kafka-to-Cosmos activity projection
 debezium/                  replication user and connector registration
+kafka/                     dynamic KRaft bootstrap, topic reconciliation, and ISR verification
 docs/                      architecture narrative and decisions
 scripts/                   end-to-end and multi-replica failover checks
 infra/aws/                 Terraform state bootstrap and AWS runtime infrastructure

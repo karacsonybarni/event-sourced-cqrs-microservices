@@ -69,90 +69,107 @@ services:
 
   kafka:
     image: apache/kafka:4.3.1
+    command: ["/workspace/kafka/start-broker.sh"]
     environment:
       KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: CONTROLLER://:9093,PLAINTEXT://:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_INTERNAL_HOST: kafka
+      KAFKA_EXTERNAL_HOST: localhost
+      KAFKA_EXTERNAL_PORT: 19092
+      KAFKA_CONTROLLER_QUORUM_BOOTSTRAP_SERVERS: kafka:9093,kafka-2:9093,kafka-3:9093
+      KAFKA_HEAP_OPTS: -Xms192m -Xmx320m
+    mem_limit: 640m
     ports:
-      - "9092:9092"
+      - "19092:9094"
+    volumes:
+      - kafka-1-data:/var/lib/kafka/data
+      - ./kafka:/workspace/kafka:ro
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      test: ["CMD-SHELL", "test -f /tmp/kafka-controller-ready && /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
       interval: 5s
       timeout: 5s
-      retries: 20
+      retries: 30
+      start_period: 10s
 
-  kafka-init:
+  kafka-2:
     image: apache/kafka:4.3.1
+    command: ["/workspace/kafka/start-broker.sh"]
+    environment:
+      KAFKA_NODE_ID: 2
+      KAFKA_INTERNAL_HOST: kafka-2
+      KAFKA_EXTERNAL_HOST: localhost
+      KAFKA_EXTERNAL_PORT: 29092
+      KAFKA_CONTROLLER_QUORUM_BOOTSTRAP_SERVERS: kafka:9093,kafka-2:9093,kafka-3:9093
+      KAFKA_HEAP_OPTS: -Xms192m -Xmx320m
+    mem_limit: 640m
+    ports:
+      - "29092:9094"
+    volumes:
+      - kafka-2-data:/var/lib/kafka/data
+      - ./kafka:/workspace/kafka:ro
     depends_on:
       kafka:
         condition: service_healthy
-    command:
-      - /bin/bash
-      - -c
-      - |
-        /opt/kafka/bin/kafka-topics.sh \
-          --bootstrap-server kafka:9092 \
-          --create \
-          --if-not-exists \
-          --topic orders.events.v1 \
-          --partitions 3 \
-          --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh \
-          --bootstrap-server kafka:9092 \
-          --create \
-          --if-not-exists \
-          --topic orders.events.v1.inventory.DLT \
-          --partitions 3 \
-          --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh \
-          --bootstrap-server kafka:9092 \
-          --create \
-          --if-not-exists \
-          --topic inventory.events.v1 \
-          --partitions 3 \
-          --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh \
-          --bootstrap-server kafka:9092 \
-          --create \
-          --if-not-exists \
-          --topic inventory.events.v1.orders.DLT \
-          --partitions 3 \
-          --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh \
-          --bootstrap-server kafka:9092 \
-          --create \
-          --if-not-exists \
-          --topic orders.events.v1.DLT \
-          --partitions 3 \
-          --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh \
-          --bootstrap-server kafka:9092 \
-          --create \
-          --if-not-exists \
-          --topic orders.events.v1.activity.DLT \
-          --partitions 3 \
-          --replication-factor 1
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/kafka-controller-ready && /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  kafka-3:
+    image: apache/kafka:4.3.1
+    command: ["/workspace/kafka/start-broker.sh"]
+    environment:
+      KAFKA_NODE_ID: 3
+      KAFKA_INTERNAL_HOST: kafka-3
+      KAFKA_EXTERNAL_HOST: localhost
+      KAFKA_EXTERNAL_PORT: 39092
+      KAFKA_CONTROLLER_QUORUM_BOOTSTRAP_SERVERS: kafka:9093,kafka-2:9093,kafka-3:9093
+      KAFKA_HEAP_OPTS: -Xms192m -Xmx320m
+    mem_limit: 640m
+    ports:
+      - "39092:9094"
+    volumes:
+      - kafka-3-data:/var/lib/kafka/data
+      - ./kafka:/workspace/kafka:ro
+    depends_on:
+      kafka-2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/kafka-controller-ready && /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  kafka-init:
+    image: apache/kafka:4.3.1
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092,kafka-2:9092,kafka-3:9092
+      CONTROLLER_BOOTSTRAP_SERVERS: kafka:9093,kafka-2:9093,kafka-3:9093
+    volumes:
+      - ./kafka:/workspace/kafka:ro
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    command: ["/workspace/kafka/reconcile-cluster.sh"]
 
   debezium:
     image: quay.io/debezium/connect:3.6.1.Final
     environment:
-      BOOTSTRAP_SERVERS: kafka:9092
+      BOOTSTRAP_SERVERS: kafka:9092,kafka-2:9092,kafka-3:9092
       GROUP_ID: orders-debezium
       CONFIG_STORAGE_TOPIC: orders.connect.configs
       OFFSET_STORAGE_TOPIC: orders.connect.offsets
       STATUS_STORAGE_TOPIC: orders.connect.statuses
-      CONFIG_STORAGE_REPLICATION_FACTOR: 1
-      OFFSET_STORAGE_REPLICATION_FACTOR: 1
-      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_PRODUCER_ACKS: all
       KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       KEY_CONVERTER_SCHEMAS_ENABLE: "false"
@@ -197,7 +214,7 @@ services:
       DATABASE_URL: jdbc:postgresql://command-db:5432/orders_command
       DATABASE_USERNAME: orders
       DATABASE_PASSWORD: orders
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092,kafka-2:9092,kafka-3:9092
       SAGA_ACTIVATION_AT: ${SAGA_ACTIVATION_AT:-1970-01-01T00:00:00Z}
     ports:
       - "8081"
@@ -221,7 +238,7 @@ services:
       DATABASE_URL: jdbc:postgresql://inventory-db:5432/inventory
       DATABASE_USERNAME: inventory
       DATABASE_PASSWORD: inventory
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092,kafka-2:9092,kafka-3:9092
       SAGA_ACTIVATION_AT: ${SAGA_ACTIVATION_AT:-1970-01-01T00:00:00Z}
     ports:
       - "8084"
@@ -245,7 +262,7 @@ services:
       DATABASE_URL: jdbc:postgresql://query-db:5432/orders_query
       DATABASE_USERNAME: orders
       DATABASE_PASSWORD: orders
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092,kafka-2:9092,kafka-3:9092
     ports:
       - "8085"
     depends_on:
@@ -321,3 +338,9 @@ volumes:
   command-db-data:
   query-db-data:
   inventory-db-data:
+  kafka-1-data:
+    name: cqrs-orders-kafka-1-data
+  kafka-2-data:
+    name: cqrs-orders-kafka-2-data
+  kafka-3-data:
+    name: cqrs-orders-kafka-3-data

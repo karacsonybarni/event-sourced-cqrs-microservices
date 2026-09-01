@@ -27,7 +27,7 @@ compose=(
 )
 
 ./mvnw --batch-mode --no-transfer-progress -DskipTests package
-"${compose[@]}" build
+COMPOSE_PARALLEL_LIMIT=1 "${compose[@]}" build
 
 if ! grep --quiet '^SAGA_ACTIVATION_AT=' "${runtime_environment}"; then
   # Finish all fallible preparation first, then quiesce command ingress before
@@ -38,7 +38,7 @@ if ! grep --quiet '^SAGA_ACTIVATION_AT=' "${runtime_environment}"; then
   printf 'SAGA_ACTIVATION_AT=%sZ\n' "${saga_activation_at:0:26}" >>"${runtime_environment}"
 fi
 
-if ! "${compose[@]}" up --no-build --detach --wait --remove-orphans \
+if ! "${compose[@]}" up --no-build --detach --wait --wait-timeout 600 --remove-orphans \
   --scale order-command-service=2 \
   --scale order-query-service=2; then
   "${compose[@]}" logs --no-color --tail 200 >&2 || true

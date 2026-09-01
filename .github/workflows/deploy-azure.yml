@@ -179,7 +179,7 @@ jobs:
             --resource-group "${RESOURCE_GROUP}" \
             --name "${function_app_name}" \
             --settings \
-              "KAFKA_BROKERS=10.42.1.4:9094" \
+              "KAFKA_BROKERS=10.42.1.4:9094,10.42.1.4:9095,10.42.1.4:9096" \
               "COSMOS_DATABASE_NAME=orders-activity" \
               "COSMOS_CONTAINER_NAME=events" \
               "CosmosConnection__accountEndpoint=https://${function_app_name}.documents.azure.com:443/" \
@@ -334,7 +334,9 @@ jobs:
           echo "Serverless smoke failed; collecting Kafka diagnostics from the Azure VM." >&2
           remote_diagnostics="$(cat <<'REMOTE_SCRIPT'
           echo "=== Kafka VNET listener ==="
-          timeout 5 bash -c "</dev/tcp/10.42.1.4/9094" && echo "10.42.1.4:9094 reachable on VM" || true
+          for port in 9094 9095 9096; do
+            timeout 5 bash -c "</dev/tcp/10.42.1.4/${port}" && echo "10.42.1.4:${port} reachable on VM" || true
+          done
           echo "=== Activity consumer group ==="
           docker exec cqrs-orders-kafka-1 /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --group order-activity-function-v1 --describe || true
           echo "=== Orders topic offsets ==="

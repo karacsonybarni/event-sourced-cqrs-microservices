@@ -178,7 +178,7 @@ resource "azurerm_function_app_flex_consumption" "activity" {
     "AzureWebJobsStorage__accountName"  = azurerm_storage_account.activity_function.name
     "AzureWebJobsStorage__credential"   = "managedidentity"
     "AzureWebJobsStorage__clientId"     = azurerm_user_assigned_identity.activity_function.client_id
-    "KAFKA_BROKERS"                     = "10.42.1.4:9094"
+    "KAFKA_BROKERS"                     = "10.42.1.4:9094,10.42.1.4:9095,10.42.1.4:9096"
     "COSMOS_DATABASE_NAME"              = azurerm_cosmosdb_sql_database.activity.name
     "COSMOS_CONTAINER_NAME"             = azurerm_cosmosdb_sql_container.activity.name
     "CosmosConnection__accountEndpoint" = azurerm_cosmosdb_account.activity.endpoint
