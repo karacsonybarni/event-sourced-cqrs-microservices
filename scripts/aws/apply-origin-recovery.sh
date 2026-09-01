@@ -80,10 +80,25 @@ if grep -q 'aws_instance\.platform' <<<"${plan_text}"; then
   echo "Refusing to modify or replace the EC2 host." >&2
   exit 1
 fi
+
+mapfile -t destructive_changes < <(
+  grep -E '^  # .* (will be destroyed|must be replaced)$' <<<"${plan_text}" || true
+)
+for destructive_change in "${destructive_changes[@]}"; do
+  if [[ "${destructive_change}" != "  # aws_ssm_association.gateway_origin_refresh must be replaced" ]]; then
+    echo "Safety check failed: unexpected destructive Terraform action:" >&2
+    echo "${destructive_change}" >&2
+    echo "Only replacement of aws_ssm_association.gateway_origin_refresh is permitted." >&2
+    exit 1
+  fi
+done
+
 if grep -Eq 'Plan: .* [1-9][0-9]* to destroy' <<<"${plan_text}"; then
-  echo "Safety check failed: the origin-recovery plan contains destroy actions." >&2
-  echo "Refusing to apply a destructive maintenance plan." >&2
-  exit 1
+  if [[ "${#destructive_changes[@]}" -ne 1 || "${destructive_changes[0]}" != "  # aws_ssm_association.gateway_origin_refresh must be replaced" ]]; then
+    echo "Safety check failed: Terraform reports destroy actions that were not uniquely identified as the expected SSM association replacement." >&2
+    exit 1
+  fi
+  echo "Allowing the expected replacement of aws_ssm_association.gateway_origin_refresh."
 fi
 
 terraform -chdir="${repository_root}/infra/aws" apply \
