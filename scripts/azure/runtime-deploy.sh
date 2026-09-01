@@ -88,10 +88,10 @@ cleanup() {
          "${cluster_mutated}" == "true") ]]; then
     if [[ "${cluster_existed}" != "true" ]]; then
       k3s kubectl delete namespace "${namespace}" --ignore-not-found --wait --timeout=120s
-      "${application_compose[@]}" up --no-build --detach --wait --remove-orphans \
+      "${application_compose[@]}" up --no-build --detach --wait --wait-timeout 600 --remove-orphans \
         --scale order-command-service=2 \
         --scale order-query-service=2 \
-        command-db query-db inventory-db kafka kafka-init debezium \
+        command-db query-db inventory-db kafka kafka-2 kafka-3 kafka-init debezium \
         order-command-service order-projection-worker order-query-service \
         inventory-service api-gateway frontend edge-proxy
     else
@@ -128,8 +128,8 @@ cleanup() {
         done
       fi
       if [[ "${platform_mutated}" == "true" ]]; then
-        "${compose[@]}" up --no-build --detach --wait \
-          command-db query-db inventory-db kafka kafka-init debezium
+        "${compose[@]}" up --no-build --detach --wait --wait-timeout 600 \
+          command-db query-db inventory-db kafka kafka-2 kafka-3 kafka-init debezium
       fi
     fi
   fi
@@ -196,9 +196,16 @@ if [[ -n "${existing_gateway}" ]]; then
 fi
 
 platform_mutated="true"
-"${compose[@]}" up --no-build --detach --wait \
+EXPECTED_KAFKA_CLUSTER_ID=5L6g3nShT-eMCtK--X86sw \
+  ./scripts/kafka/prepare-storage.sh \
+  --profile ui \
+  --env-file "${runtime_environment}" \
+  --file compose.yml \
+  --file compose.azure.yml \
+  --file compose.kubernetes-platform.yml
+"${compose[@]}" up --no-build --detach --wait --wait-timeout 600 \
   --remove-orphans \
-  command-db query-db inventory-db kafka kafka-init debezium
+  command-db query-db inventory-db kafka kafka-2 kafka-3 kafka-init debezium
 
 if [[ "${cluster_existed}" != "true" ]]; then
   # The first cutover must reclaim the measured Compose application footprint
@@ -388,6 +395,17 @@ done
 GATEWAY_URL=http://127.0.0.1:18080 \
 VERIFY_PLATFORM=false \
   ./scripts/smoke-test.sh
+
+GATEWAY_URL=http://127.0.0.1:18080 \
+VERIFY_PLATFORM=false \
+COMPOSE_FILE=compose.yml:compose.azure.yml:compose.kubernetes-platform.yml \
+COMPOSE_ENV_FILES="${runtime_environment}" \
+  ./scripts/kafka-broker-failover-test.sh \
+    --profile ui \
+    --env-file "${runtime_environment}" \
+    --file compose.yml \
+    --file compose.azure.yml \
+    --file compose.kubernetes-platform.yml
 
 for connector_name in order-events inventory-events; do
   connector_status="$(curl --fail --silent "http://${platform_host}:8083/connectors/${connector_name}/status")"

@@ -15,6 +15,14 @@ services:
     ports: !override
       - "${PLATFORM_HOST:?Set PLATFORM_HOST}:9094:9094"
 
+  kafka-2:
+    ports: !override
+      - "${PLATFORM_HOST:?Set PLATFORM_HOST}:9095:9094"
+
+  kafka-3:
+    ports: !override
+      - "${PLATFORM_HOST:?Set PLATFORM_HOST}:9096:9094"
+
   debezium:
     ports: !override
       - "${PLATFORM_HOST:?Set PLATFORM_HOST}:8083:8083"

@@ -6,7 +6,7 @@ This deployment keeps the complete event-sourced CQRS topology available on Azur
 
 Verified React order portal and API endpoint: [https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com](https://escqrs-62636a3dc4.polandcentral.cloudapp.azure.com)
 
-The tested `Standard_B2as_v2` VM has two vCPUs and 8 GiB of memory. A measurement before the Kubernetes migration showed about 4.7 GiB in use and 3.1 GiB available. K3s owns the stateless application containers instead of duplicating them in Compose, leaving enough measured headroom for its control plane and containerd. This remains a constrained demonstration target, not a production capacity recommendation.
+The tested `Standard_B2as_v2` VM has two vCPUs and 8 GiB of memory. The pre-change runtime measurement showed 5.13 GiB in use, 2.76 GiB available, and no swap. Each Kafka broker uses a 192 MiB initial/320 MiB maximum heap and a 640 MiB container limit. A representative local RF3/ISR3 run stabilized at 412-427 MiB per broker, about 1.23 GiB total. The three broker limits total 1.875 GiB, an 875 MiB cap increase over the former one-GiB broker limit; the measured Azure headroom therefore leaves about 1.88 GiB before other workload growth. The independent projection worker retains its existing 576 MiB K3s limit. Limits are ceilings rather than reserved memory, and the local sample is evidence for this demo rather than a throughput or production-capacity claim.
 
 The VM is not one of Azure's 12-month free shapes; promotional credit funds it. `scripts/azure/verify-free-plan.sh` blocks provisioning unless the subscription is `Enabled` and its spending limit is `On`, so Azure stops resources instead of charging a payment method when included credit is exhausted. The public service therefore remains available only while promotional credit or another credit-backed allowance remains active.
 
@@ -25,6 +25,7 @@ flowchart TB
             Caddy --> Gateway[Spring Gateway Deployment]
             Gateway -->|Kubernetes Service DNS| Command[Command Deployment - 2 replicas]
             Gateway -->|Kubernetes Service DNS| Query[Query Deployment - 2 replicas]
+            Projector[Projection Worker Deployment]
             Inventory[Inventory Deployment]
         end
 
@@ -32,15 +33,16 @@ flowchart TB
             EventStore[(Command PostgreSQL)] -->|logical replication| Debezium[Debezium Connect]
             InventoryDB[(Inventory PostgreSQL)] -->|logical replication| Debezium
             QueryDB[(Query PostgreSQL)]
-            Debezium --> Kafka[Apache Kafka]
+            Debezium --> Kafka[Apache Kafka<br/>3 combined broker/controllers]
         end
 
         Command --> EventStore
         Command --> Kafka
         Inventory --> InventoryDB
         Inventory --> Kafka
+        Kafka --> Projector
+        Projector --> QueryDB
         Query --> QueryDB
-        Query --> Kafka
     end
 
     Kafka -->|private VNet listener| Function[Azure Function]
@@ -50,15 +52,30 @@ flowchart TB
     Terraform[Terraform] --> State[(Azure Blob state - private + versioned)]
 ```
 
-Kubernetes owns the command, query, Inventory, gateway, frontend, and edge workloads in the `cqrs-orders` namespace. Deployments use immutable commit-SHA image tags, rolling-update policy, startup/readiness/liveness probes, graceful termination, explicit resource requests and limits, runtime-default seccomp, restricted service-account token mounting, and ingress NetworkPolicies. Kustomize owns the reusable base and Azure overlay. The edge keeps certificate state in a one-GiB local-path persistent volume.
+Kubernetes owns the command, projection worker, query, Inventory, gateway, frontend, and edge workloads in the `cqrs-orders` namespace. Deployments use immutable commit-SHA image tags, rolling-update policy, startup/readiness/liveness probes, graceful termination, explicit resource requests and limits, runtime-default seccomp, restricted service-account token mounting, and ingress NetworkPolicies. Kustomize owns the reusable base and Azure overlay. The edge keeps certificate state in a one-GiB local-path persistent volume.
 
 The gateway receives direct Kubernetes Service URIs, so Kubernetes DNS and ready Service endpoints own routing to command and query replicas. Local and AWS Compose environments use the same gateway contract with Compose service DNS.
 
-PostgreSQL, Kafka, and Debezium stay in Compose for this increment to preserve existing data volumes, replication slots, connector offsets, and event history. Selectorless Kubernetes Services with explicit EndpointSlices map stable in-cluster names to the VM's private `10.42.1.4` platform listeners. K3s uses `10.244.0.0/16` for pods and `10.96.0.0/12` for Services so neither range overlaps the Azure virtual network's `10.42.0.0/16` address space.
+PostgreSQL, the three-node Kafka cluster, and Debezium stay in Compose to preserve database volumes, replication slots, connector offsets, and event history. Three selectorless Kubernetes Services and EndpointSlices expose `kafka`, `kafka-2`, and `kafka-3` as bootstrap names and map them to `10.42.1.4:9094`, `:9095`, and `:9096`. Broker metadata advertises those same VM-private endpoints, so K3s consumers can reconnect after bootstrap and after a leader election. K3s uses `10.244.0.0/16` for pods and `10.96.0.0/12` for Services so neither range overlaps the Azure virtual network's `10.42.0.0/16` address space.
 
-Only ports 80 and 443 are public. K3s ServiceLB claims those host ports and forwards them to Caddy, which redirects HTTP to HTTPS, obtains and renews the certificate, routes `/api` to the gateway, `/serverless` to the Function, and browser paths to the frontend. PostgreSQL and Debezium bind only the VM's private address. The network security group permits the Function subnet to reach Kafka on `10.42.1.4:9094` and does not expose Kafka publicly. SSH has no inbound rule; Azure Run Command is the normal administration and deployment path.
+Only ports 80 and 443 are public. K3s ServiceLB claims those host ports and forwards them to Caddy, which redirects HTTP to HTTPS, obtains and renews the certificate, routes `/api` to the gateway, `/serverless` to the Function, and browser paths to the frontend. PostgreSQL and Debezium bind only the VM's private address. The network security group permits the Function subnet to reach Kafka on `10.42.1.4:9094-9096` and does not expose Kafka publicly. The Function receives all three endpoints in `KAFKA_BROKERS`. SSH has no inbound rule; Azure Run Command is the normal administration and deployment path.
 
-This one-node cluster is not highly available. A VM failure stops the synchronous path and Kafka processing, the Caddy volume is node-local, and images are imported into the single node's containerd store. A production topology should use multi-node AKS, a managed registry, managed multi-zone PostgreSQL, and a managed Kafka-compatible service. [ADR-007](adr/007-incremental-kubernetes-application-tier.md) records why this migration stops at the stateless boundary.
+This one-VM deployment is not highly available. Stopping one Kafka process demonstrates replica election and recovery, but a VM, disk, or host-network failure stops every broker together with the synchronous path. Combined broker/controller roles are acceptable for this demo; a critical production deployment should separate those roles and place brokers, controllers, and storage in independent failure domains. The Caddy volume is also node-local, and images are imported into the single node's containerd store. [ADR-007](adr/007-incremental-kubernetes-application-tier.md) records why the Kubernetes migration stops at the stateless boundary, and [ADR-010](adr/010-three-broker-kraft-cluster.md) records the Kafka boundary.
+
+## Kafka state migration
+
+Azure delivery performs one controlled Kafka/Connect outage when node 1 has not yet adopted `cqrs-orders-kafka-1-data`. `scripts/kafka/prepare-storage.sh` follows this sequence:
+
+1. start the current one-node broker if necessary and require the expected cluster ID `5L6g3nShT-eMCtK--X86sw`;
+2. finalize `kraft.version=1` while the static quorum is available, then verify the finalized feature level;
+3. read the broker's effective `log.dirs`, stop Debezium Connect and Kafka cleanly, and copy that complete log tree into the stable named node-1 volume;
+4. verify `meta.properties`, cluster/node identity, and a byte-for-byte recursive comparison; refuse a non-empty volume with another cluster ID instead of overwriting it;
+5. start node 1 with `controller.quorum.bootstrap.servers`; format nodes 2 and 3 with the preserved cluster ID and `--no-initial-controllers`;
+6. allow each new controller to reach observer lag zero before `add-controller`, adding node 3 only after node 2 is a healthy voter;
+7. create missing transaction state safely, explicitly reassign every application, DLT, Connect, consumer-offset, and transaction-state partition to brokers 1/2/3, and wait until every governed partition reaches ISR 3 before setting `min.insync.replicas=2`; and
+8. start Connect with its preserved config/offset/status topics and all three bootstrap endpoints.
+
+The source container remains stopped and recoverable until Compose reconciles node 1. The migration never formats the adopted node-1 volume, deletes a source log tree, resets connector offsets, or substitutes a new cluster ID. Any identity, copy, feature-level, observer, reassignment, or ISR mismatch stops delivery for diagnosis. Once dynamic membership and RF3 are established, recovery operates on the three-node cluster; it is not a destructive return to a fresh single-node cluster. The cutover consumes approximately two additional copies of retained Kafka data plus normal replication overhead, so VM disk usage must be monitored as retention grows.
 
 ## Provision
 
@@ -107,7 +124,7 @@ The recovery SSH private key is generated under `AZURE_CONFIG_DIR` and is never 
 
 ## Delivery and verification
 
-`.github/workflows/deploy-azure.yml` runs after successful `main` CI or by manual dispatch for a selected branch. Topic branches under `codex/**` receive exact-SHA CI on push so a reviewed branch can pass CI and a manual Azure deployment before `main` advances. Manual dispatch refuses a revision without successful exact-SHA CI, and manual CI reruns integration unless its parent is itself proven successful. GitHub exchanges its OIDC token for short-lived Azure credentials and deploys the exact checked-out commit. The Function package is updated first. Azure Run Command then installs or reconciles the pinned K3s version, preserves the Compose platform, builds application images from that commit, imports them into containerd, applies the Kustomize overlay, waits for every rollout, retires the superseded Compose application containers, registers both Debezium connectors idempotently, runs the saga smoke test through a gateway port-forward, retains one rollback image revision, and prunes older application images and excess build cache.
+`.github/workflows/deploy-azure.yml` runs after successful `main` CI or by manual dispatch for a selected branch. Topic branches under `codex/**` receive exact-SHA CI on push so a reviewed branch can pass CI and a manual Azure deployment before `main` advances. Manual dispatch refuses a revision without successful exact-SHA CI, and manual CI reruns integration unless its parent is itself proven successful. GitHub exchanges its OIDC token for short-lived Azure credentials and deploys the exact checked-out commit. The Function package is updated first. Azure Run Command then installs or reconciles the pinned K3s version, migrates or verifies Kafka storage and dynamic quorum membership, builds application images from that commit, imports them into containerd, applies the Kustomize overlay, waits for every rollout, retires the superseded Compose application containers, registers both Debezium connectors idempotently, runs the saga smoke test and broker-leader failover/ISR-recovery acceptance through a gateway port-forward, retains one rollback image revision, and prunes older application images and excess build cache.
 
 The workflow independently verifies that every Kubernetes application image uses the expected commit SHA, the exact expected Deployment set is available, and the public saga, UI, HTTPS, and Kafka-to-Cosmos paths work. A successful workflow therefore proves the selected Git revision, the cluster rollout, and the externally observable behavior together.
 

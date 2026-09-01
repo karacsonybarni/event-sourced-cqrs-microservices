@@ -86,9 +86,9 @@ run "cost_controlled_cloud_topology" {
       azurerm_network_security_rule.function_kafka.protocol == "Tcp" &&
       azurerm_network_security_rule.function_kafka.source_address_prefix == azurerm_subnet.functions.address_prefixes[0] &&
       azurerm_network_security_rule.function_kafka.destination_address_prefix == "10.42.1.4" &&
-      azurerm_network_security_rule.function_kafka.destination_port_range == "9094"
+      toset(azurerm_network_security_rule.function_kafka.destination_port_ranges) == toset(["9094", "9095", "9096"])
     )
-    error_message = "The Function subnet must explicitly allow the VM Kafka VNET listener on 10.42.1.4:9094."
+    error_message = "The Function subnet must explicitly allow all three VM Kafka VNET listeners on ports 9094-9096."
   }
 
   assert {
@@ -139,6 +139,11 @@ run "cost_controlled_cloud_topology" {
   assert {
     condition     = azurerm_function_app_flex_consumption.activity.virtual_network_subnet_id == azurerm_subnet.functions.id
     error_message = "The Function must reach Kafka only through the delegated private-network subnet."
+  }
+
+  assert {
+    condition     = azurerm_function_app_flex_consumption.activity.app_settings.KAFKA_BROKERS == "10.42.1.4:9094,10.42.1.4:9095,10.42.1.4:9096"
+    error_message = "The Function must bootstrap from every Kafka broker endpoint."
   }
 
   assert {

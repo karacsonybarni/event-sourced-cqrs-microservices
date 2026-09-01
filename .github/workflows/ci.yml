@@ -209,7 +209,7 @@ jobs:
         run: ./scripts/validate-kubernetes.sh
       - name: Validate shell scripts
         run: |
-          bash -n scripts/*.sh scripts/aws/*.sh scripts/azure/*.sh
+          bash -n scripts/*.sh scripts/aws/*.sh scripts/azure/*.sh scripts/kafka/*.sh kafka/*.sh
           if ! awk '
             /--scripts .*ACTIVITY_FUNCTION_HOST=.*KAFKA_VNET_HOST=.*sudo tee .*&& sudo systemctl start event-sourced-cqrs.service && printf .*AZURE_RUNTIME_INITIALIZATION_SUCCEEDED/ { runtime_initialization = NR }
             /--query .*value\[\]\.message/ { command_output = NR }
@@ -222,7 +222,7 @@ jobs:
           fi
           docker run --rm -v "$PWD:/mnt" \
             koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d \
-            scripts/*.sh scripts/aws/*.sh scripts/azure/*.sh
+            scripts/*.sh scripts/aws/*.sh scripts/azure/*.sh scripts/kafka/*.sh kafka/*.sh
 
   integration:
     needs: [changes, build, infrastructure]
@@ -244,6 +244,8 @@ jobs:
         run: make ui-smoke
       - name: Verify platform DNS routing and replica failover
         run: make scale-smoke
+      - name: Verify Kafka broker failover and ISR recovery
+        run: make kafka-failover
       - name: Capture service logs on failure
         if: failure()
         run: docker compose logs --no-color
