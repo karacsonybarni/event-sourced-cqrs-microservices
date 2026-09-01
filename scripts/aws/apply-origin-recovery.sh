@@ -2,11 +2,14 @@
 set -Eeuo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-aws_region="${AWS_REGION:-eu-central-1}"
+aws_region="${AWS_REGION:-${AWS_DEFAULT_REGION:-eu-central-1}}"
 project_name="${PROJECT_NAME:-event-sourced-cqrs}"
 github_repository="${GITHUB_REPOSITORY:-karacsonybarni/event-sourced-cqrs-microservices}"
 github_environment="${GITHUB_ENVIRONMENT:-cloud}"
 plan_file=".origin-recovery.tfplan"
+
+export AWS_REGION="${aws_region}"
+export AWS_DEFAULT_REGION="${aws_region}"
 
 for command_name in aws gh terraform; do
   if ! command -v "${command_name}" >/dev/null; then
@@ -15,11 +18,11 @@ for command_name in aws gh terraform; do
   fi
 done
 
-aws_account_id="$(aws sts get-caller-identity --query Account --output text)"
+aws_account_id="$(aws sts get-caller-identity --region "${aws_region}" --query Account --output text)"
 gh auth status --hostname github.com >/dev/null
 
 state_bucket="${project_name}-${aws_account_id}-tfstate"
-if ! aws s3api head-bucket --bucket "${state_bucket}" >/dev/null 2>&1; then
+if ! aws s3api head-bucket --bucket "${state_bucket}" --region "${aws_region}" >/dev/null 2>&1; then
   echo "Existing Terraform state bucket is not accessible: ${state_bucket}" >&2
   echo "Refusing to bootstrap or create replacement infrastructure from this maintenance script." >&2
   exit 1
