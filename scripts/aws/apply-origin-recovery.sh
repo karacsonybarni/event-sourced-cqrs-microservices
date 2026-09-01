@@ -107,6 +107,53 @@ terraform -chdir="${repository_root}/infra/aws" apply \
   -input=false \
   "${plan_file}"
 
+printf 'Running the origin-refresh service once through Systems Manager...\n'
+ssm_parameters='{"commands":["systemctl reset-failed event-sourced-cqrs-origin-refresh.service || true; systemctl restart event-sourced-cqrs-origin-refresh.service; systemctl is-active --quiet event-sourced-cqrs-origin-refresh.service"]}'
+command_id="$(aws ssm send-command \
+  --region "${aws_region}" \
+  --instance-ids "${instance_id}" \
+  --document-name AWS-RunShellScript \
+  --parameters "${ssm_parameters}" \
+  --query 'Command.CommandId' \
+  --output text)"
+
+command_status=""
+for attempt in $(seq 1 240); do
+  command_status="$(aws ssm get-command-invocation \
+    --region "${aws_region}" \
+    --command-id "${command_id}" \
+    --instance-id "${instance_id}" \
+    --query 'Status' \
+    --output text 2>/dev/null || true)"
+  case "${command_status}" in
+    Success)
+      break
+      ;;
+    Failed|Cancelled|TimedOut|Cancelling)
+      break
+      ;;
+  esac
+  sleep 2
+done
+
+if [[ "${command_status}" != "Success" ]]; then
+  echo "Origin-refresh runtime verification failed through SSM (status: ${command_status:-unknown})." >&2
+  aws ssm get-command-invocation \
+    --region "${aws_region}" \
+    --command-id "${command_id}" \
+    --instance-id "${instance_id}" \
+    --query '{Status:Status,StatusDetails:StatusDetails,ResponseCode:ResponseCode,Stdout:StandardOutputContent,Stderr:StandardErrorContent}' \
+    --output json >&2 || true
+  exit 1
+fi
+
+aws ssm get-command-invocation \
+  --region "${aws_region}" \
+  --command-id "${command_id}" \
+  --instance-id "${instance_id}" \
+  --query 'StandardOutputContent' \
+  --output text
+
 gh variable set AWS_INSTANCE_ID --repo "${github_repository}" --body "${instance_id}"
 
 public_dns="$(aws ec2 describe-instances \
