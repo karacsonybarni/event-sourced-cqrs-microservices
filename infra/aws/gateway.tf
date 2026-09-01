@@ -7,7 +7,7 @@ resource "aws_apigatewayv2_integration" "platform" {
   api_id                 = aws_apigatewayv2_api.platform.id
   integration_type       = "HTTP_PROXY"
   integration_method     = "ANY"
-  integration_uri        = "http://${aws_eip.platform.public_ip}:8080"
+  integration_uri        = "http://${aws_instance.platform.public_dns}:8080"
   payload_format_version = "1.0"
 }
 
