@@ -48,3 +48,14 @@ resource "aws_instance" "platform" {
     aws_route_table_association.public,
   ]
 }
+
+resource "aws_eip" "platform" {
+  domain   = "vpc"
+  instance = aws_instance.platform.id
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-origin"
+  }
+
+  depends_on = [aws_internet_gateway.platform]
+}
