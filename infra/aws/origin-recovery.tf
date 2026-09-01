@@ -76,8 +76,8 @@ resource "aws_ssm_association" "gateway_origin_refresh" {
   }
 
   targets {
-    key    = "InstanceIds"
-    values = [aws_instance.platform.id]
+    key    = "tag:Name"
+    values = ["${var.project_name}-${var.environment}"]
   }
 
   max_concurrency                  = "1"
