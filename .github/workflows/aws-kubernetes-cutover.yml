@@ -1,6 +1,6 @@
 name: AWS Kubernetes Cutover
 
-# Temporary branch-only harness; marker commits trigger the live migration test.
+# Temporary branch-only harness; retrying after the k3s node-registration guard.
 on:
   push:
     branches: [feat/aws-kubernetes-runtime]
