@@ -63,7 +63,7 @@ resource "aws_ssm_association" "gateway_origin_refresh" {
   association_name = "${var.project_name}-${var.environment}-refresh-api-origin"
 
   parameters = {
-    commands = join("\n", [
+    commands         = join("\n", [
       "printf '%s' '${base64encode(local.gateway_origin_refresh_script)}' | base64 --decode > /usr/local/bin/refresh-event-sourced-cqrs-origin",
       "chmod 0755 /usr/local/bin/refresh-event-sourced-cqrs-origin",
       "printf '%s' '${base64encode(local.gateway_origin_refresh_unit)}' | base64 --decode > /etc/systemd/system/event-sourced-cqrs-origin-refresh.service",
