@@ -94,7 +94,7 @@ gh variable set AWS_DEPLOY_ENABLED --repo "${github_repository}" --body "true"
 gh variable set AWS_DEPLOY_ROLE_ARN --repo "${github_repository}" --body "${deployment_role_arn}"
 gh variable set AWS_INSTANCE_ID --repo "${github_repository}" --body "${instance_id}"
 gh variable set AWS_REGION --repo "${github_repository}" --body "${aws_region}"
-gh variable set PUBLIC_API_URL --repo "${github_repository}" --body "${public_api_url}"
+gh variable set PUBLIC_API_URL --repo "${github_repository}" --env "${github_environment}" --body "${public_api_url}"
 
 gh workflow run deploy-aws.yml --repo "${github_repository}" --ref main
 
