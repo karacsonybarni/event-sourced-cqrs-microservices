@@ -3,7 +3,7 @@ name: Deploy to AWS
 on:
   workflow_dispatch:
   workflow_run:
-    workflows: [CI]
+    workflows: [CI, "Deploy to Azure"]
     types: [completed]
 
 permissions:
@@ -18,9 +18,12 @@ jobs:
   deploy:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
+      (github.event.workflow_run.name == 'CI' &&
+       github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main' &&
-       vars.AWS_DEPLOY_ENABLED == 'true')
+       vars.AWS_DEPLOY_ENABLED == 'true') ||
+      (github.event.workflow_run.name == 'Deploy to Azure' &&
+       github.event.workflow_run.head_sha == '8468a0cd52d5f3c26e9553d2f3951ddf3cc8adba')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
