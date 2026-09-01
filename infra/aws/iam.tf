@@ -102,12 +102,25 @@ resource "aws_iam_role" "github_deploy" {
 
 data "aws_iam_policy_document" "github_deploy" {
   statement {
-    sid     = "RunDeploymentOnManagedInstance"
+    sid     = "RunDeploymentDocument"
     actions = ["ssm:SendCommand"]
     resources = [
-      aws_instance.platform.arn,
       "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}::document/AWS-RunShellScript",
     ]
+  }
+
+  statement {
+    sid     = "RunDeploymentOnTaggedInstance"
+    actions = ["ssm:SendCommand"]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*",
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ssm:resourceTag/Name"
+      values   = ["${var.project_name}-${var.environment}"]
+    }
   }
 
   statement {
