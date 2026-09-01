@@ -9,7 +9,15 @@ compose=(docker compose --profile ui)
 
 ./scripts/kafka/prepare-storage.sh --profile ui
 ./mvnw --batch-mode --no-transfer-progress -DskipTests package
-COMPOSE_PARALLEL_LIMIT=1 "${compose[@]}" build
+for service in \
+  order-command-service \
+  inventory-service \
+  order-projection-worker \
+  order-query-service \
+  api-gateway \
+  frontend; do
+  "${compose[@]}" build "${service}"
+done
 "${compose[@]}" up --no-build --detach --wait --wait-timeout 600 --remove-orphans command-db
 
 activation_at="$(

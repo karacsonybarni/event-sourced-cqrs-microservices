@@ -195,7 +195,6 @@ if [[ -n "${existing_gateway}" ]]; then
     }' >"${runtime_config_backup}"
 fi
 
-platform_mutated="true"
 EXPECTED_KAFKA_CLUSTER_ID=5L6g3nShT-eMCtK--X86sw \
   ./scripts/kafka/prepare-storage.sh \
   --profile ui \
@@ -203,6 +202,7 @@ EXPECTED_KAFKA_CLUSTER_ID=5L6g3nShT-eMCtK--X86sw \
   --file compose.yml \
   --file compose.azure.yml \
   --file compose.kubernetes-platform.yml
+platform_mutated="true"
 "${compose[@]}" up --no-build --detach --wait --wait-timeout 600 \
   --remove-orphans \
   command-db query-db inventory-db kafka kafka-2 kafka-3 kafka-init debezium

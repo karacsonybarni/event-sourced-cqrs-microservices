@@ -27,7 +27,15 @@ compose=(
 )
 
 ./mvnw --batch-mode --no-transfer-progress -DskipTests package
-COMPOSE_PARALLEL_LIMIT=1 "${compose[@]}" build
+for service in \
+  order-command-service \
+  inventory-service \
+  order-projection-worker \
+  order-query-service \
+  api-gateway \
+  frontend; do
+  "${compose[@]}" build "${service}"
+done
 
 if ! grep --quiet '^SAGA_ACTIVATION_AT=' "${runtime_environment}"; then
   # Finish all fallible preparation first, then quiesce command ingress before
