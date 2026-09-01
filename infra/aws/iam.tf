@@ -95,20 +95,6 @@ data "aws_iam_policy_document" "github_deploy" {
   }
 
   statement {
-    sid     = "StartDeploymentInstance"
-    actions = ["ec2:StartInstances"]
-    resources = [
-      aws_instance.platform.arn,
-    ]
-  }
-
-  statement {
-    sid     = "ObserveDeploymentInstance"
-    actions = ["ec2:DescribeInstances"]
-    resources = ["*"]
-  }
-
-  statement {
     sid = "ObserveDeploymentCommand"
     actions = [
       "ssm:DescribeInstanceInformation",
