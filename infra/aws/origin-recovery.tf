@@ -80,8 +80,8 @@ resource "aws_ssm_association" "gateway_origin_refresh" {
     values = [aws_instance.platform.id]
   }
 
-  max_concurrency                   = "1"
-  max_errors                        = "0"
+  max_concurrency                  = "1"
+  max_errors                       = "0"
   wait_for_success_timeout_seconds = 480
 
   depends_on = [
