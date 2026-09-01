@@ -37,7 +37,7 @@ locals {
     exit 1
   SCRIPT
 
-  gateway_origin_refresh_unit   = <<-UNIT
+  gateway_origin_refresh_unit = <<-UNIT
     [Unit]
     Description=Refresh API Gateway origin after EC2 address changes
     After=network-online.target
@@ -63,7 +63,7 @@ resource "aws_ssm_association" "gateway_origin_refresh" {
   association_name = "${var.project_name}-${var.environment}-refresh-api-origin"
 
   parameters = {
-    commands         = join("\n", [
+    commands = join("\n", [
       "printf '%s' '${base64encode(local.gateway_origin_refresh_script)}' | base64 --decode > /usr/local/bin/refresh-event-sourced-cqrs-origin",
       "chmod 0755 /usr/local/bin/refresh-event-sourced-cqrs-origin",
       "printf '%s' '${base64encode(local.gateway_origin_refresh_unit)}' | base64 --decode > /etc/systemd/system/event-sourced-cqrs-origin-refresh.service",
@@ -80,8 +80,8 @@ resource "aws_ssm_association" "gateway_origin_refresh" {
     values = [aws_instance.platform.id]
   }
 
-  max_concurrency                  = "1"
-  max_errors                       = "0"
+  max_concurrency                   = "1"
+  max_errors                        = "0"
   wait_for_success_timeout_seconds = 480
 
   depends_on = [
