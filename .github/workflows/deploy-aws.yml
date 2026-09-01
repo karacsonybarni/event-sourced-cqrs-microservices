@@ -39,59 +39,70 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           role-session-name: deploy-${{ github.run_id }}
           allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
-      - name: Ensure deployment host is online
+      - name: Resolve managed deployment host
+        id: host
         env:
-          INSTANCE_ID: ${{ vars.AWS_INSTANCE_ID }}
+          CONFIGURED_INSTANCE_ID: ${{ vars.AWS_INSTANCE_ID }}
         run: |
           set -Eeuo pipefail
 
-          instance_state="$(aws ec2 describe-instances \
-            --instance-ids "${INSTANCE_ID}" \
-            --query 'Reservations[0].Instances[0].State.Name' \
+          configured_ping="$(aws ssm describe-instance-information \
+            --filters "Key=InstanceIds,Values=${CONFIGURED_INSTANCE_ID}" \
+            --query 'InstanceInformationList[0].PingStatus' \
             --output text)"
+          if [[ "${configured_ping}" == "Online" ]]; then
+            echo "instance_id=${CONFIGURED_INSTANCE_ID}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
 
-          case "${instance_state}" in
-            stopped)
-              echo "Starting stopped deployment host ${INSTANCE_ID}."
-              aws ec2 start-instances --instance-ids "${INSTANCE_ID}" >/dev/null
-              aws ec2 wait instance-running --instance-ids "${INSTANCE_ID}"
-              ;;
-            pending|running)
-              ;;
-            stopping)
-              echo "Instance ${INSTANCE_ID} is stopping; retry after it reaches stopped state." >&2
-              exit 1
-              ;;
-            shutting-down|terminated|None)
-              echo "Instance ${INSTANCE_ID} is ${instance_state}; reconcile Terraform before deployment." >&2
-              exit 1
-              ;;
-            *)
-              echo "Unexpected EC2 state for ${INSTANCE_ID}: ${instance_state}" >&2
-              exit 1
-              ;;
-          esac
-
-          ping_status=None
-          for attempt in $(seq 1 60); do
-            ping_status="$(aws ssm describe-instance-information \
-              --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
-              --query 'InstanceInformationList[0].PingStatus' \
-              --output text)"
-            if [[ "${ping_status}" == "Online" ]]; then
-              exit 0
-            fi
-            sleep 10
-          done
-
-          echo "Instance ${INSTANCE_ID} is ${instance_state} but did not become online in Systems Manager after ${attempt} checks (SSM status: ${ping_status})." >&2
+          echo "Configured instance ${CONFIGURED_INSTANCE_ID} is not online in Systems Manager (status: ${configured_ping:-unknown})." >&2
+          echo "Visible Systems Manager managed nodes:" >&2
           aws ssm describe-instance-information \
             --query 'InstanceInformationList[].{InstanceId:InstanceId,PingStatus:PingStatus,Platform:PlatformName,AgentVersion:AgentVersion,LastPing:LastPingDateTime}' \
             --output table >&2 || true
+
+          mapfile -t online_instances < <(aws ssm describe-instance-information \
+            --filters 'Key=PingStatus,Values=Online' \
+            --query 'InstanceInformationList[].InstanceId' \
+            --output text | tr '\t' '\n' | sed '/^$/d')
+
+          for candidate in "${online_instances[@]}"; do
+            command_id="$(aws ssm send-command \
+              --instance-ids "${candidate}" \
+              --document-name AWS-RunShellScript \
+              --comment 'Identify event-sourced CQRS deployment host' \
+              --parameters 'commands=test -x /usr/local/bin/deploy-event-sourced-cqrs && test -r /etc/event-sourced-cqrs/runtime.env' \
+              --query 'Command.CommandId' \
+              --output text 2>/dev/null || true)"
+            [[ -n "${command_id}" && "${command_id}" != "None" ]] || continue
+
+            status=Pending
+            for attempt in $(seq 1 12); do
+              status="$(aws ssm get-command-invocation \
+                --command-id "${command_id}" \
+                --instance-id "${candidate}" \
+                --query 'Status' \
+                --output text 2>/dev/null || printf 'Pending')"
+              case "${status}" in
+                Success|Cancelled|Failed|TimedOut|Cancelling) break ;;
+              esac
+              sleep 5
+            done
+
+            if [[ "${status}" == "Success" ]]; then
+              echo "Recovered current platform instance ${candidate} through the IAM-scoped identity probe."
+              echo "instance_id=${candidate}" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            echo "Identity probe for ${candidate} ended with ${status} after ${attempt} checks." >&2
+          done
+
+          echo 'No online Systems Manager node could be verified as the Terraform-managed deployment host.' >&2
+          echo 'The EC2 host is likely stopped, terminated, or unable to reach Systems Manager; AWS-side instance recovery is required.' >&2
           exit 1
       - name: Deploy through Systems Manager
         env:
-          INSTANCE_ID: ${{ vars.AWS_INSTANCE_ID }}
+          INSTANCE_ID: ${{ steps.host.outputs.instance_id }}
         run: |
           command_id="$(aws ssm send-command \
             --instance-ids "${INSTANCE_ID}" \
