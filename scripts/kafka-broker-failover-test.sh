@@ -4,6 +4,10 @@ set -Eeuo pipefail
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repository_root}"
 
+if [[ -n "${MSYSTEM:-}" ]]; then
+  export MSYS2_ARG_CONV_EXCL="/workspace;/opt${MSYS2_ARG_CONV_EXCL:+;${MSYS2_ARG_CONV_EXCL}}"
+fi
+
 compose=(docker compose "$@")
 readonly bootstrap_servers=kafka:9092,kafka-2:9092,kafka-3:9092
 leader_service=""
@@ -27,19 +31,15 @@ restore_leader() {
 }
 trap 'restore_leader || true' EXIT
 
-"${compose[@]}" exec --no-TTY kafka \
-  env BOOTSTRAP_SERVERS="${bootstrap_servers}" \
-  /workspace/kafka/verify-cluster.sh
-
-partition_description="$(
+verification="$(
   "${compose[@]}" exec --no-TTY kafka \
-    /opt/kafka/bin/kafka-topics.sh \
-      --bootstrap-server "${bootstrap_servers}" \
-      --describe \
-      --topic orders.events.v1 |
-    awk '$0 ~ /Partition: 0([[:space:]]|$)/ { print; exit }'
+    env BOOTSTRAP_SERVERS="${bootstrap_servers}" \
+      REPORT_LEADER_TOPIC=orders.events.v1 \
+      REPORT_LEADER_PARTITION=0 \
+    /workspace/kafka/verify-cluster.sh
 )"
-leader_node="$(sed -n 's/.*Leader: \([0-9][0-9]*\).*/\1/p' <<<"${partition_description}")"
+printf '%s\n' "${verification}"
+leader_node="$(sed -n 's/^KAFKA_VERIFIED_LEADER=\([0-9][0-9]*\)$/\1/p' <<<"${verification}")"
 leader_service="$(service_for_node "${leader_node}")"
 
 case "${leader_node}" in
@@ -48,8 +48,8 @@ case "${leader_node}" in
 esac
 
 echo "Stopping current orders.events.v1 partition 0 leader: node ${leader_node} (${leader_service})"
-"${compose[@]}" stop --timeout 60 "${leader_service}"
 leader_stopped=true
+"${compose[@]}" stop --timeout 60 "${leader_service}"
 
 replacement_ready=false
 for _ in {1..60}; do
@@ -59,7 +59,7 @@ for _ in {1..60}; do
         --bootstrap-server "${bootstrap_servers}" \
         --describe \
         --topic orders.events.v1 2>/dev/null |
-      awk '$0 ~ /Partition: 0([[:space:]]|$)/ { print; exit }' || true
+      awk '$0 ~ /Partition: 0([[:space:]]|$)/ { print }' || true
   )"
   replacement_leader="$(sed -n 's/.*Leader: \([0-9][0-9]*\).*/\1/p' <<<"${description}")"
   isr="$(sed -n 's/.*Isr: \([^[:space:]]*\).*/\1/p' <<<"${description}")"
@@ -75,7 +75,7 @@ if [[ "${replacement_ready}" != "true" ]]; then
   exit 1
 fi
 
-./scripts/smoke-test.sh
+SMOKE_WAIT_ATTEMPTS=90 ./scripts/smoke-test.sh
 
 restore_leader
 

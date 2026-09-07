@@ -4,6 +4,8 @@ set -euo pipefail
 readonly KAFKA_HOME=${KAFKA_HOME:-/opt/kafka}
 readonly BOOTSTRAP_SERVERS=${BOOTSTRAP_SERVERS:-kafka:9092,kafka-2:9092,kafka-3:9092}
 readonly CONTROLLER_BOOTSTRAP_SERVERS=${CONTROLLER_BOOTSTRAP_SERVERS:-kafka:9093,kafka-2:9093,kafka-3:9093}
+readonly REPORT_LEADER_TOPIC=${REPORT_LEADER_TOPIC:-}
+readonly REPORT_LEADER_PARTITION=${REPORT_LEADER_PARTITION:-0}
 
 declare -A expected_partitions=(
   [orders.events.v1]=3
@@ -31,13 +33,24 @@ if [[ "${voters}" != "1 2 3" ]]; then
   exit 1
 fi
 
+topic_descriptions=$(
+  "${KAFKA_HOME}/bin/kafka-topics.sh" \
+    --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+    --describe
+)
+topic_configs=$(
+  "${KAFKA_HOME}/bin/kafka-configs.sh" \
+    --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+    --entity-type topics \
+    --describe
+)
+
 for topic in "${!expected_partitions[@]}"; do
-  description=$(
-    "${KAFKA_HOME}/bin/kafka-topics.sh" \
-      --bootstrap-server "${BOOTSTRAP_SERVERS}" \
-      --describe \
-      --topic "${topic}"
-  )
+  description=$(awk -v topic="${topic}" '$1 == "Topic:" && $2 == topic { print }' <<<"${topic_descriptions}")
+  if [[ -z "${description}" ]]; then
+    echo "${topic}: topic description was not returned" >&2
+    exit 1
+  fi
   summary=$(head -n 1 <<<"${description}")
   partition_count=$(sed -n 's/.*PartitionCount: \([0-9][0-9]*\).*/\1/p' <<<"${summary}")
   replication_factor=$(sed -n 's/.*ReplicationFactor: \([0-9][0-9]*\).*/\1/p' <<<"${summary}")
@@ -64,17 +77,29 @@ for topic in "${!expected_partitions[@]}"; do
     fi
   done < <(tail -n +2 <<<"${description}")
 
-  configs=$(
-    "${KAFKA_HOME}/bin/kafka-configs.sh" \
-      --bootstrap-server "${BOOTSTRAP_SERVERS}" \
-      --entity-type topics \
-      --entity-name "${topic}" \
-      --describe
-  )
+  configs=$(awk -v heading="Dynamic configs for topic ${topic} are:" '
+    $0 == heading { matching_topic = 1; next }
+    matching_topic && /^Dynamic configs for topic / { exit }
+    matching_topic { print }
+  ' <<<"${topic_configs}")
   if ! grep -q 'min.insync.replicas=2' <<<"${configs}"; then
     echo "${topic}: min.insync.replicas is not explicitly 2" >&2
     exit 1
   fi
 done
+
+if [[ -n "${REPORT_LEADER_TOPIC}" ]]; then
+  partition_description=$(awk \
+    -v topic="${REPORT_LEADER_TOPIC}" \
+    -v partition="${REPORT_LEADER_PARTITION}" \
+    '$1 == "Topic:" && $2 == topic && $3 == "Partition:" && $4 == partition { print; exit }' \
+    <<<"${topic_descriptions}")
+  leader=$(sed -n 's/.*Leader: \([0-9][0-9]*\).*/\1/p' <<<"${partition_description}")
+  if [[ -z "${leader}" ]]; then
+    echo "${REPORT_LEADER_TOPIC}: partition ${REPORT_LEADER_PARTITION} leader was not returned" >&2
+    exit 1
+  fi
+  echo "KAFKA_VERIFIED_LEADER=${leader}"
+fi
 
 echo "Kafka dynamic quorum, replication factor, and ISR verification passed"

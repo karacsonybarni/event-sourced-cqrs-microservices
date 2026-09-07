@@ -142,10 +142,20 @@ if ! is_voter; then
     exit 1
   fi
 
-  "${KAFKA_HOME}/bin/kafka-metadata-quorum.sh" \
-    --bootstrap-controller "${KAFKA_CONTROLLER_QUORUM_BOOTSTRAP_SERVERS}" \
-    --command-config "${SERVER_CONFIG}" \
-    add-controller
+  # Fresh brokers may join together. A concurrent voter change can require
+  # retrying registration; an existing voter must never be added again.
+  for _ in {1..60}; do
+    if is_voter; then
+      break
+    fi
+    if "${KAFKA_HOME}/bin/kafka-metadata-quorum.sh" \
+        --bootstrap-controller "${KAFKA_CONTROLLER_QUORUM_BOOTSTRAP_SERVERS}" \
+        --command-config "${SERVER_CONFIG}" \
+        add-controller; then
+      break
+    fi
+    sleep 2
+  done
 fi
 
 voter_ready=false
