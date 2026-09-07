@@ -7,7 +7,6 @@ cd "${repository_root}"
 
 compose=(docker compose --profile ui)
 
-./scripts/kafka/prepare-storage.sh --profile ui
 ./mvnw --batch-mode --no-transfer-progress -DskipTests package
 for service in \
   order-command-service \
@@ -18,6 +17,8 @@ for service in \
   frontend; do
   "${compose[@]}" build "${service}"
 done
+
+./scripts/kafka/prepare-storage.sh --profile ui
 "${compose[@]}" up --no-build --detach --wait --wait-timeout 600 --remove-orphans command-db
 
 activation_at="$(

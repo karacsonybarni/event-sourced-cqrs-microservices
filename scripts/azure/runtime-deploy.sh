@@ -195,8 +195,7 @@ if [[ -n "${existing_gateway}" ]]; then
     }' >"${runtime_config_backup}"
 fi
 
-EXPECTED_KAFKA_CLUSTER_ID=5L6g3nShT-eMCtK--X86sw \
-  ./scripts/kafka/prepare-storage.sh \
+./scripts/kafka/prepare-storage.sh \
   --profile ui \
   --env-file "${runtime_environment}" \
   --file compose.yml \
