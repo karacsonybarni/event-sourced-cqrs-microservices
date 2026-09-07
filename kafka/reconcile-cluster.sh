@@ -56,7 +56,7 @@ csv_count() {
 
 write_reassignment_file() {
   local topic description summary replication_factor partition_line partition replicas
-  local broker replica separator= partition_separator=
+  local broker replica separator='' partition_separator=''
   local -a current_replicas assignment
 
   reassignment_needed=false
