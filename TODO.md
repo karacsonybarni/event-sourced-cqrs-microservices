@@ -16,6 +16,9 @@ The feature adds three Kafka broker/controllers, persistent storage migration, d
 
 - [ ] Read the exact published revision and the target branch, current main, and relevant instructions.
 - [ ] Integrate current main into the feature branch, resolving the AWS runtime deployment conflict while preserving both branches' intended behavior. Inspect automatically merged deployment files too.
+- [ ] Fix confirmed migration review finding: kafka/reconcile-cluster.sh executes --generate output unchanged, which preserves RF1 instead of expanding it. Generate an explicit three-distinct-broker replica assignment for every existing governed partition, preserve partition identities and records, and prove RF1 to RF3 migration reaches ISR3. Avoid early-closing live Kafka command output pipes.
+- [ ] Fix confirmed migration review finding: the AWS runtime entry point must run the storage preparation/migration before any Compose reconciliation can replace the original Kafka container and logs. Preserve main's deployment and readiness behavior while resolving the conflict.
+- [ ] Fix confirmed redeployment review finding: scripts/azure/runtime-deploy.sh hardcodes a cluster ID from one deployment, rejecting subsequent deployments of a freshly generated cluster. Retain identity validation against persisted/live state and optional explicitly configured expected identity; do not impose a deployment-specific ID on all installations.
 - [ ] Run relevant validation, including Bash syntax and ShellCheck for changed scripts and Compose configuration validation. State any tests unavailable in this environment.
 - [ ] Remove this task-scoped TODO.md before returning the implementation. No other task files are in scope for deletion.
 - [ ] Push changes only to codex/kafka-broker-failover, or return a complete applicable patch if GitHub writes are unavailable.
