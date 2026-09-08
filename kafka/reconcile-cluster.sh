@@ -119,7 +119,7 @@ write_reassignment_file() {
 }
 
 reassign_topics_to_three() {
-  local verification
+  local verification expected_count completed_count
   local -a topics=("$@")
 
   write_reassignment_file "${topics[@]}" >"${REASSIGNMENT_FILE}"
@@ -132,6 +132,7 @@ reassign_topics_to_three() {
     --reassignment-json-file "${REASSIGNMENT_FILE}" \
     --execute
 
+  expected_count=$(grep -o '"partition":' "${REASSIGNMENT_FILE}" | wc -l)
   for _ in {1..200}; do
     verification=$(
       "${KAFKA_HOME}/bin/kafka-reassign-partitions.sh" \
@@ -139,8 +140,8 @@ reassign_topics_to_three() {
         --reassignment-json-file "${REASSIGNMENT_FILE}" \
         --verify
     )
-    if grep -q 'completed successfully' <<<"${verification}" && \
-        ! grep -q 'is still in progress' <<<"${verification}"; then
+    completed_count=$(grep -c '^Reassignment of partition .* is completed\.$' <<<"${verification}" || true)
+    if [[ "${expected_count}" -gt 0 && "${completed_count}" -eq "${expected_count}" ]]; then
       return 0
     fi
     sleep 3
