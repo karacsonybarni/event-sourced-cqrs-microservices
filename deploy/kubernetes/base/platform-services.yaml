@@ -93,6 +93,52 @@ endpoints:
 apiVersion: v1
 kind: Service
 metadata:
+  name: kafka-2
+spec:
+  ports:
+    - name: kafka
+      port: 9092
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: kafka-2-external
+  labels:
+    kubernetes.io/service-name: kafka-2
+addressType: IPv4
+ports:
+  - name: kafka
+    protocol: TCP
+    port: 9095
+endpoints:
+  - addresses: ["127.0.0.1"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-3
+spec:
+  ports:
+    - name: kafka
+      port: 9092
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: kafka-3-external
+  labels:
+    kubernetes.io/service-name: kafka-3
+addressType: IPv4
+ports:
+  - name: kafka
+    protocol: TCP
+    port: 9096
+endpoints:
+  - addresses: ["127.0.0.1"]
+---
+apiVersion: v1
+kind: Service
+metadata:
   name: debezium
 spec:
   ports:

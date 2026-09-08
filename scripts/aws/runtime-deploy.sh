@@ -67,8 +67,16 @@ compose=(
   --file compose.kubernetes-platform.yml
 )
 
+./scripts/kafka/prepare-storage.sh \
+  --profile ui \
+  --env-file "${runtime_environment}" \
+  --file compose.yml \
+  --file compose.cloud.yml \
+  --file compose.aws-kubernetes.yml \
+  --file compose.kubernetes-platform.yml
+
 "${compose[@]}" up --no-build --detach --wait \
-  command-db query-db inventory-db kafka kafka-init debezium
+  command-db query-db inventory-db kafka kafka-2 kafka-3 kafka-init debezium
 
 # Reclaim the legacy Compose application footprint before building and importing
 # the Kubernetes application images. The stateful platform remains in Compose.

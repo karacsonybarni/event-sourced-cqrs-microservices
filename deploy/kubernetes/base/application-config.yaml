@@ -3,5 +3,5 @@ kind: ConfigMap
 metadata:
   name: application-config
 data:
-  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092,kafka-2:9092,kafka-3:9092
   JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70.0 -XX:+UseG1GC

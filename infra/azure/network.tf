@@ -79,7 +79,7 @@ resource "azurerm_network_security_rule" "function_kafka" {
   access                      = "Allow"
   protocol                    = "Tcp"
   source_port_range           = "*"
-  destination_port_range      = "9094"
+  destination_port_ranges     = ["9094", "9095", "9096"]
   source_address_prefix       = azurerm_subnet.functions.address_prefixes[0]
   destination_address_prefix  = "10.42.1.4"
   resource_group_name         = azurerm_resource_group.runtime.name

@@ -28,11 +28,27 @@ services:
     ports: !override
       - "9094:9094"
     environment:
-      KAFKA_LISTENERS: "CONTROLLER://:9093,PLAINTEXT://:9092,VNET://:9094"
-      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,VNET://${KAFKA_VNET_HOST:?Set KAFKA_VNET_HOST}:9094"
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,VNET:PLAINTEXT"
-      KAFKA_HEAP_OPTS: "-Xms384m -Xmx640m"
-    mem_limit: 1g
+      KAFKA_EXTERNAL_HOST: "${KAFKA_VNET_HOST:?Set KAFKA_VNET_HOST}"
+      KAFKA_EXTERNAL_PORT: 9094
+    mem_limit: 640m
+    logging: *azure_logging
+
+  kafka-2:
+    ports: !override
+      - "9095:9094"
+    environment:
+      KAFKA_EXTERNAL_HOST: "${KAFKA_VNET_HOST:?Set KAFKA_VNET_HOST}"
+      KAFKA_EXTERNAL_PORT: 9095
+    mem_limit: 640m
+    logging: *azure_logging
+
+  kafka-3:
+    ports: !override
+      - "9096:9094"
+    environment:
+      KAFKA_EXTERNAL_HOST: "${KAFKA_VNET_HOST:?Set KAFKA_VNET_HOST}"
+      KAFKA_EXTERNAL_PORT: 9096
+    mem_limit: 640m
     logging: *azure_logging
 
   kafka-init:

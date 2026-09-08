@@ -8,7 +8,13 @@ expected_query_instances="${EXPECTED_QUERY_INSTANCES:-1}"
 expected_inventory_instances="${EXPECTED_INVENTORY_INSTANCES:-1}"
 verify_platform="${VERIFY_PLATFORM:-true}"
 verify_inventory_state="${VERIFY_INVENTORY_STATE:-${verify_platform}}"
+wait_attempts="${SMOKE_WAIT_ATTEMPTS:-30}"
 idempotency_key="smoke-$(date +%s)-${RANDOM}"
+
+if [[ ! "${wait_attempts}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "SMOKE_WAIT_ATTEMPTS must be a positive integer" >&2
+  exit 2
+fi
 
 wait_for_health() {
   local attempts=30
@@ -58,7 +64,7 @@ wait_for_instances() {
 wait_for_status() {
   local order_id="$1"
   local expected_status="$2"
-  local attempts=30
+  local attempts="${wait_attempts}"
   for ((attempt = 1; attempt <= attempts; attempt++)); do
     local response
     response="$(curl --silent "${gateway_url}/api/orders/${order_id}")"
@@ -83,7 +89,7 @@ inventory_stock() {
 wait_for_inventory_event() {
   local order_id="$1"
   local expected_event_type="$2"
-  local attempts=30
+  local attempts="${wait_attempts}"
   for ((attempt = 1; attempt <= attempts; attempt++)); do
     local event_count
     event_count="$(docker compose exec -T inventory-db \

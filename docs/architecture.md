@@ -149,6 +149,10 @@ This projection is an independent observer. Command handling and the primary que
 
 Kafka supplies the asynchronous messaging boundary. Producers and consumers are decoupled in time, retained records can be replayed, consumer groups track independent progress, and a partition key preserves per-order ordering. Azure Service Bus would add another broker and delivery hop without a separate messaging requirement, so the architecture uses one durable event backbone.
 
+One logical Kafka 4.3.1 KRaft cluster contains three stable nodes with combined broker/controller roles. The six application and dead-letter topics retain three partitions and use replication factor 3; Kafka consumer-offset and transaction topics and Debezium Connect config, offset, and status topics also use replication factor 3. Every governed topic sets `min.insync.replicas=2`, and Spring plus Debezium producer configuration requires `acks=all`. Clients receive all three bootstrap endpoints and then follow listener-specific broker metadata. The local host listeners are `localhost:19092`, `localhost:29092`, and `localhost:39092`; Compose clients use the three service-DNS endpoints on port 9092.
+
+Combined roles keep this demonstration small enough for one development or credit-funded VM. A critical production cluster should separate brokers from controllers and distribute both roles, storage, and network paths across independent failure domains. Three processes on one VM demonstrate broker replication, leader election, and ISR recovery, but a VM failure stops the complete cluster.
+
 The cloud artifacts map the common service models to concrete ownership boundaries:
 
 | Model | Project example | Current state | Responsibility boundary |
@@ -166,7 +170,7 @@ External clients know only the gateway's stable address. The gateway routes to s
 
 The default Compose topology and Azure Kubernetes application tier each run two command replicas and two query replicas. Compose assigns backend host ports dynamically, removes stopped containers from the service DNS result, and verifies continued gateway traffic through a surviving replica. Kubernetes uses declarative replica ownership, readiness probes, rolling updates, and stable Services; deleting one pod demonstrates replacement and continued routing.
 
-Command replicas are stateless. PostgreSQL owns client idempotency claims, aggregate stream locks, expected versions, and the atomic event append. Query replicas share one Kafka consumer group, so partitions are assigned across the active consumers; the aggregate ID remains the Kafka key, preserving per-stream order. Every query replica reads the same query database, while the processed-event table and aggregate version make redelivery idempotent.
+Command replicas are stateless. PostgreSQL owns client idempotency claims, aggregate stream locks, expected versions, and the atomic event append. The independently deployable projection worker owns the Kafka consumer group and writes the shared query database; query replicas only serve the materialized view. The aggregate ID remains the Kafka key, preserving per-stream order, while the processed-event table and aggregate version make projection redelivery idempotent.
 
 Compose DNS does not provide a separate health-aware application registry, so container health and the complete gateway path are checked independently before deployment and during the replica-failover smoke test. Kubernetes additionally removes unready endpoints from Services. Azure's one-node K3s placement still does not provide infrastructure high availability.
 
@@ -217,6 +221,7 @@ The first saga rollout does not use Kafka retention as a migration boundary. Dep
 | Failure | Observable result | Recovery |
 | --- | --- | --- |
 | Kafka unavailable after command commit | Event remains authoritative in PostgreSQL; query model lags | Debezium resumes from its replication offset |
+| One Kafka broker stops | Leaders move to an in-sync replica; `acks=all` writes continue with ISR 2 | Restore the broker and require every governed partition to return to ISR 3 |
 | Inventory unavailable after order creation | Order remains visibly `CREATED` | Kafka retains the event; Inventory reserves or rejects after recovery |
 | Inventory result is redelivered | Consumer sees an existing inbox event ID | Commit no additional order transition |
 | Order is cancelled after reservation | Order reaches `CANCELLED` before Inventory may finish | Inventory consumes the cancellation, restores stock, and appends `InventoryReleased.v1` |
@@ -234,14 +239,14 @@ The first saga rollout does not use Kafka retention as a migration boundary. Dep
 
 ## Cloud deployments and production path
 
-The credit-protected Azure environment packages the complete topology onto one encrypted two-vCPU/eight-GiB VM while separating orchestration by responsibility. K3s owns the stateless application tier; Docker Compose retains PostgreSQL, Kafka, and Debezium so existing data and connector offsets cross the migration unchanged. Immutable commit-tagged images, Kustomize, health probes, resource policy, secret/config projection, ingress NetworkPolicies, persistent Caddy certificate storage, and exact-revision rollout checks make the orchestration behavior observable. The economical placement has constrained headroom and one failure domain, so it is not a production capacity or availability recommendation. Azure also adds stable DNS, Caddy-managed HTTPS, private versioned Blob state, an Entra workload identity federated to GitHub Actions, Azure Run Command, boot diagnostics, and an explicit budget. Provisioning is allowed only while the Azure subscription is enabled with its spending limit set to `On`. See [Azure cloud deployment](azure-deployment.md), [ADR-004](adr/004-credit-protected-azure-deployment.md), and [ADR-007](adr/007-incremental-kubernetes-application-tier.md).
+The credit-protected Azure environment packages the complete topology onto one encrypted two-vCPU/eight-GiB VM while separating orchestration by responsibility. K3s owns the stateless application tier; Docker Compose retains PostgreSQL, the three Kafka nodes, and Debezium. The Kafka migration adopts the existing node-1 log directory into a stable named volume, preserves its cluster ID and connector offsets, changes the static quorum to dynamic membership, catches up nodes 2 and 3 as observers before adding them as voters, and explicitly reassigns existing RF1 partitions before requiring ISR 3. Immutable commit-tagged images, Kustomize, health probes, resource policy, secret/config projection, ingress NetworkPolicies, persistent Caddy certificate storage, and exact-revision rollout checks make the orchestration behavior observable. The economical placement has constrained headroom and one failure domain, so it is not a production capacity or availability recommendation. Azure also adds stable DNS, Caddy-managed HTTPS, private versioned Blob state, an Entra workload identity federated to GitHub Actions, Azure Run Command, boot diagnostics, and an explicit budget. Provisioning is allowed only while the Azure subscription is enabled with its spending limit set to `On`. See [Azure cloud deployment](azure-deployment.md), [ADR-004](adr/004-credit-protected-azure-deployment.md), [ADR-007](adr/007-incremental-kubernetes-application-tier.md), and [ADR-010](adr/010-three-broker-kraft-cluster.md).
 
 The cost-optimized AWS environment packages the complete topology onto one encrypted EC2 host, places an API Gateway HTTP API at the public boundary, and uses Terraform, S3 remote state, GitHub OIDC, Systems Manager, CloudWatch, and explicit budgets for repeatable operations. Container memory limits reflect the measured runtime footprint, internal ports remain private, and the management endpoint is separated from public gateway traffic. See [AWS cloud deployment](aws-deployment.md) and [ADR-003](adr/003-cost-optimized-aws-deployment.md).
 
 Both economical environments demonstrate application-level replica behavior but deliberately do not describe one host as highly available. The production evolution is:
 
 - Scale gateway and command instances statelessly; PostgreSQL uniqueness and stream locks coordinate writes.
-- Increase Kafka partitions and query consumers together. Keeping `aggregateId` as the key preserves per-stream order.
+- Increase Kafka partitions and projection-worker consumers together. Keeping `aggregateId` as the key preserves per-stream order.
 - Monitor replication-slot lag, Kafka consumer lag, connector/task state, DLT depth, command latency, and projection latency.
 - Use managed secrets, TLS, Kafka ACLs, and a least-privilege replication identity outside local development.
 - Add periodic aggregate snapshots only when measured replay cost requires them. Snapshots are derived caches, never replacements for history.
