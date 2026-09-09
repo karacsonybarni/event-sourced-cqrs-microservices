@@ -6,7 +6,7 @@ cd "${repository_root}"
 
 compose=(docker compose "$@")
 readonly kafka_image=apache/kafka:4.3.1
-readonly stable_volume=cqrs-orders-kafka-1-data
+readonly stable_volume=${KAFKA_STORAGE_VOLUME:-cqrs-orders-kafka-1-data}
 readonly expected_cluster_id=${EXPECTED_KAFKA_CLUSTER_ID:-}
 
 kafka_container="$("${compose[@]}" ps --all --quiet kafka 2>/dev/null || true)"
@@ -34,7 +34,6 @@ if [[ "${mounted_volume}" == "${stable_volume}" ]]; then
 fi
 
 staging_directory="$(mktemp -d)"
-server_config="$(mktemp)"
 kafka_was_running="$(docker inspect --format '{{.State.Running}}' "${kafka_container}")"
 connect_container="$("${compose[@]}" ps --all --quiet debezium 2>/dev/null || true)"
 connect_was_running=false
@@ -46,7 +45,6 @@ cleanup() {
   exit_status=$?
   trap - EXIT
   set +e
-  rm -f "${server_config}"
   rm -rf "${staging_directory}"
 
   if [[ "${migration_complete}" != "true" ]]; then
@@ -104,6 +102,14 @@ if [[ -n "${expected_cluster_id}" && "${live_cluster_id}" != "${expected_cluster
   exit 1
 fi
 
+# The image-generated properties can omit log.dirs and use Kafka's default.
+# Ask the live broker rather than guessing a path from a template or defaults.
+log_directories="$(
+  docker exec "${kafka_container}" /opt/kafka/bin/kafka-log-dirs.sh \
+    --bootstrap-server localhost:9092 --broker-list 1 --describe |
+    bash "${repository_root}/scripts/kafka/read-log-directory.sh"
+)"
+
 feature_description="$(
   docker exec "${kafka_container}" /opt/kafka/bin/kafka-features.sh \
     --bootstrap-server localhost:9092 describe
@@ -125,25 +131,20 @@ if ! grep -Eq 'Feature: kraft.version[[:space:]]+SupportedMinVersion:.*Finalized
   exit 1
 fi
 
-docker cp "${kafka_container}:/opt/kafka/config/server.properties" "${server_config}" >/dev/null
-log_directories="$(awk -F= '$1 == "log.dirs" { print $2 }' "${server_config}")"
-if [[ -z "${log_directories}" || "${log_directories}" == *,* ]]; then
-  echo "Expected exactly one Kafka log directory, found: ${log_directories:-none}" >&2
-  exit 1
-fi
-
 if [[ "${connect_was_running}" == "true" ]]; then
   docker stop --time 60 "${connect_container}" >/dev/null
 fi
 docker stop --time 60 "${kafka_container}" >/dev/null
 
-docker cp --archive "${kafka_container}:${log_directories}/." "${staging_directory}" >/dev/null
-if [[ ! -f "${staging_directory}/meta.properties" ]]; then
+# Copy the directory itself into a new child so its owner/mode are retained;
+# copying only its contents would keep mktemp's root-owned 0700 directory.
+docker cp --archive "${kafka_container}:${log_directories}" "${staging_directory}/data" >/dev/null
+if [[ ! -f "${staging_directory}/data/meta.properties" ]]; then
   echo "Kafka log copy has no meta.properties" >&2
   exit 1
 fi
-source_cluster_id="$(awk -F= '$1 == "cluster.id" { print $2 }' "${staging_directory}/meta.properties")"
-source_node_id="$(awk -F= '$1 == "node.id" { print $2 }' "${staging_directory}/meta.properties")"
+source_cluster_id="$(awk -F= '$1 == "cluster.id" { print $2 }' "${staging_directory}/data/meta.properties")"
+source_node_id="$(awk -F= '$1 == "node.id" { print $2 }' "${staging_directory}/data/meta.properties")"
 if [[ -z "${source_cluster_id}" || "${source_node_id}" != "1" ]]; then
   echo "Kafka log copy has invalid cluster/node identity" >&2
   exit 1
@@ -175,21 +176,26 @@ if [[ -n "${target_has_data}" ]]; then
   fi
 else
   docker run --rm --user root \
-    --volume "${staging_directory}:/source:ro" \
+    --volume "${staging_directory}/data:/source:ro" \
     --volume "${stable_volume}:/target" \
     "${kafka_image}" \
     bash -ec 'cp -a /source/. /target/'
 fi
 
 docker run --rm --user root \
-  --volume "${staging_directory}:/source:ro" \
+  --volume "${staging_directory}/data:/source:ro" \
   --volume "${stable_volume}:/target:ro" \
   "${kafka_image}" \
   bash -ec '
+    set -o pipefail
     diff -qr /source /target
-    diff \
-      <(cd /source && find . -printf "%P\t%y\t%m\t%U\t%G\t%s\n" | sort) \
-      <(cd /target && find . -printf "%P\t%y\t%m\t%U\t%G\t%s\n" | sort)
+    # The Kafka image has BusyBox find (no -printf). Materialize manifests
+    # so a failed traversal cannot be hidden by process substitution.
+    # Directory allocation sizes differ across filesystems; diff above checks
+    # file content, while these manifests check types, permissions and owners.
+    (cd /source && find . -exec stat -c "%n %F %a %u %g" {} + | sort) > /tmp/source-manifest
+    (cd /target && find . -exec stat -c "%n %F %a %u %g" {} + | sort) > /tmp/target-manifest
+    diff /tmp/source-manifest /tmp/target-manifest
   '
 
 migration_complete=true
