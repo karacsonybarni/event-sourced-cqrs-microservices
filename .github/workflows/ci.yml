@@ -223,6 +223,8 @@ jobs:
           docker run --rm -v "$PWD:/mnt" \
             koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d \
             scripts/*.sh scripts/aws/*.sh scripts/azure/*.sh scripts/kafka/*.sh kafka/*.sh
+      - name: Test Kafka log-directory discovery
+        run: bash scripts/kafka/test-log-directory.sh
 
   integration:
     needs: [changes, build, infrastructure]
@@ -236,6 +238,8 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+      - name: Verify legacy Kafka storage adoption
+        run: bash scripts/kafka/test-storage-adoption.sh
       - name: Start multi-replica architecture
         run: make up
       - name: Verify event-sourced CQRS flow
