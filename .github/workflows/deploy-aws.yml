@@ -52,7 +52,7 @@ jobs:
         with:
           ref: ${{ env.DEPLOY_REVISION }}
       - name: Configure short-lived AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6.2.3
+        uses: aws-actions/configure-aws-credentials@v6.2.4
         with:
           aws-region: ${{ vars.AWS_REGION }}
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
