@@ -202,9 +202,12 @@ fi
   --file compose.azure.yml \
   --file compose.kubernetes-platform.yml
 platform_mutated="true"
-"${compose[@]}" up --no-build --detach --wait --wait-timeout 600 \
+if ! "${compose[@]}" up --no-build --detach --wait --wait-timeout 600 \
   --remove-orphans \
-  command-db query-db inventory-db kafka kafka-2 kafka-3 kafka-init debezium
+  command-db query-db inventory-db kafka kafka-2 kafka-3 kafka-init debezium; then
+  "${compose[@]}" logs --no-color --tail 120 kafka kafka-2 kafka-3 kafka-init >&2 || true
+  exit 1
+fi
 
 if [[ "${cluster_existed}" != "true" ]]; then
   # The first cutover must reclaim the measured Compose application footprint

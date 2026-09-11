@@ -1,0 +1,18 @@
+services:
+  kafka:
+    image: apache/kafka:4.3.1
+    command: /workspace/kafka/start-broker.sh
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_INTERNAL_HOST: kafka
+      KAFKA_EXTERNAL_HOST: localhost
+      KAFKA_EXTERNAL_PORT: 19092
+      KAFKA_CONTROLLER_QUORUM_BOOTSTRAP_SERVERS: kafka:9093
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+      - ../../kafka:/workspace/kafka:ro
+
+volumes:
+  kafka-data:
+    external: true
+    name: ${KAFKA_STORAGE_VOLUME}

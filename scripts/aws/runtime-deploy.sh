@@ -75,8 +75,11 @@ compose=(
   --file compose.aws-kubernetes.yml \
   --file compose.kubernetes-platform.yml
 
-"${compose[@]}" up --no-build --detach --wait \
-  command-db query-db inventory-db kafka kafka-2 kafka-3 kafka-init debezium
+if ! "${compose[@]}" up --no-build --detach --wait \
+  command-db query-db inventory-db kafka kafka-2 kafka-3 kafka-init debezium; then
+  "${compose[@]}" logs --no-color --tail 120 kafka kafka-2 kafka-3 kafka-init >&2 || true
+  exit 1
+fi
 
 # Reclaim the legacy Compose application footprint before building and importing
 # the Kubernetes application images. The stateful platform remains in Compose.

@@ -9,6 +9,16 @@ readonly kafka_image=apache/kafka:4.3.1
 readonly stable_volume=${KAFKA_STORAGE_VOLUME:-cqrs-orders-kafka-1-data}
 readonly expected_cluster_id=${EXPECTED_KAFKA_CLUSTER_ID:-}
 
+kafka_runtime_identity="$(
+  docker run --rm --entrypoint bash "${kafka_image}" \
+    -ec 'printf "%s:%s" "$(id -u)" "$(id -g)"'
+)"
+
+repair_stable_volume_ownership() {
+  docker run --rm --user root --volume "${stable_volume}:/target" "${kafka_image}" \
+    bash -ec 'chown -R "$1" /target' _ "${kafka_runtime_identity}"
+}
+
 kafka_container="$("${compose[@]}" ps --all --quiet kafka 2>/dev/null || true)"
 if [[ -z "${kafka_container}" ]]; then
   echo "No existing Kafka container found; fresh dynamic-cluster bootstrap will create stable storage."
@@ -21,14 +31,23 @@ if [[ "${mounted_volume}" == "${stable_volume}" ]]; then
     docker run --rm --user root --volume "${stable_volume}:/target:ro" "${kafka_image}" \
       bash -ec 'test -f /target/meta.properties; awk -F= '\''$1 == "cluster.id" { print $2 }'\'' /target/meta.properties'
   )"
+  stable_node_id="$(
+    docker run --rm --user root --volume "${stable_volume}:/target:ro" "${kafka_image}" \
+      bash -ec 'test -f /target/meta.properties; awk -F= '\''$1 == "node.id" { print $2 }'\'' /target/meta.properties'
+  )"
   if [[ -z "${stable_cluster_id}" ]]; then
     echo "Stable Kafka volume ${stable_volume} has no cluster identity" >&2
+    exit 1
+  fi
+  if [[ "${stable_node_id}" != "1" ]]; then
+    echo "Stable Kafka volume belongs to node ${stable_node_id:-unknown}, expected node 1" >&2
     exit 1
   fi
   if [[ -n "${expected_cluster_id}" && "${stable_cluster_id}" != "${expected_cluster_id}" ]]; then
     echo "Stable Kafka volume belongs to ${stable_cluster_id}, expected ${expected_cluster_id}" >&2
     exit 1
   fi
+  repair_stable_volume_ownership
   echo "Kafka node 1 already uses stable volume ${stable_volume} for cluster ${stable_cluster_id}."
   exit 0
 fi
@@ -136,8 +155,9 @@ if [[ "${connect_was_running}" == "true" ]]; then
 fi
 docker stop --time 60 "${kafka_container}" >/dev/null
 
-# Copy the directory itself into a new child so its owner/mode are retained;
-# copying only its contents would keep mktemp's root-owned 0700 directory.
+# Copy the directory itself into a new child so its mode is retained. Docker cp
+# maps copied files to the invoking host user's ownership, so ownership is
+# normalized to the Kafka image's runtime identity on the validated target.
 docker cp --archive "${kafka_container}:${log_directories}" "${staging_directory}/data" >/dev/null
 if [[ ! -f "${staging_directory}/data/meta.properties" ]]; then
   echo "Kafka log copy has no meta.properties" >&2
@@ -182,6 +202,8 @@ else
     bash -ec 'cp -a /source/. /target/'
 fi
 
+repair_stable_volume_ownership
+
 docker run --rm --user root \
   --volume "${staging_directory}/data:/source:ro" \
   --volume "${stable_volume}:/target:ro" \
@@ -192,11 +214,19 @@ docker run --rm --user root \
     # The Kafka image has BusyBox find (no -printf). Materialize manifests
     # so a failed traversal cannot be hidden by process substitution.
     # Directory allocation sizes differ across filesystems; diff above checks
-    # file content, while these manifests check types, permissions and owners.
-    (cd /source && find . -exec stat -c "%n %F %a %u %g" {} + | sort) > /tmp/source-manifest
-    (cd /target && find . -exec stat -c "%n %F %a %u %g" {} + | sort) > /tmp/target-manifest
+    # file content, while these manifests check types and permissions. Target
+    # ownership is checked separately against the Kafka runtime identity.
+    (cd /source && find . -exec stat -c "%n %F %a" {} + | sort) > /tmp/source-manifest
+    (cd /target && find . -exec stat -c "%n %F %a" {} + | sort) > /tmp/target-manifest
     diff /tmp/source-manifest /tmp/target-manifest
   '
+
+docker run --rm --user root --volume "${stable_volume}:/target:ro" "${kafka_image}" \
+  bash -ec '
+    runtime_uid=${1%:*}
+    runtime_gid=${1#*:}
+    test -z "$(find /target \( ! -user "$runtime_uid" -o ! -group "$runtime_gid" \) -print -quit)"
+  ' _ "${kafka_runtime_identity}"
 
 migration_complete=true
 echo "Kafka cluster ${source_cluster_id} was copied from ${log_directories} to stable volume ${stable_volume}."
