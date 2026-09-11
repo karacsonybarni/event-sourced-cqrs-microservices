@@ -174,9 +174,14 @@ for deployment in \
   api-gateway \
   frontend; do
   if ! k3s kubectl --namespace "${namespace}" rollout status \
-    "deployment/${deployment}" --timeout=300s; then
+    "deployment/${deployment}" --timeout=600s; then
     k3s kubectl --namespace "${namespace}" get pods,services,endpointslices --output=wide >&2 || true
     k3s kubectl --namespace "${namespace}" describe "deployment/${deployment}" >&2 || true
+    k3s kubectl --namespace "${namespace}" get events \
+      --field-selector type=Warning --sort-by=.lastTimestamp >&2 || true
+    k3s kubectl --namespace "${namespace}" logs \
+      --selector "app.kubernetes.io/name=${deployment}" \
+      --all-containers --previous --prefix --tail=30 >&2 || true
     k3s kubectl --namespace "${namespace}" logs \
       --selector "app.kubernetes.io/name=${deployment}" \
       --all-containers --tail=100 >&2 || true
