@@ -205,7 +205,24 @@ platform_mutated="true"
 if ! "${compose[@]}" up --no-build --detach --wait --wait-timeout 600 \
   --remove-orphans \
   command-db query-db inventory-db kafka kafka-2 kafka-3 kafka-init debezium; then
-  "${compose[@]}" logs --no-color --tail 120 kafka kafka-2 kafka-3 kafka-init >&2 || true
+  # Azure Run Command retains only a small output tail. Keep the failing
+  # brokers' health checks and errors until after cleanup instead of allowing
+  # healthy broker INFO logs or rollback output to displace them.
+  {
+    printf 'Kafka platform startup failed.\n'
+    for broker in kafka kafka-2 kafka-3; do
+      broker_container="$("${compose[@]}" ps --all --quiet "${broker}")"
+      [[ -n "${broker_container}" ]] || continue
+      docker inspect "${broker_container}" | jq -c '.[0] | {
+        Name, Running:.State.Running, ExitCode:.State.ExitCode, OOMKilled:.State.OOMKilled,
+        Health:.State.Health.Status,
+        LastCheck:(.State.Health.Log[-1] | {ExitCode,Output:(.Output // "" | .[0:240])})
+      }' || true
+      "${compose[@]}" logs --no-color --tail 120 "${broker}" 2>&1 |
+        grep -Ei 'ERROR|Exception|OutOfMemory|Timed out|did not|Waiting for controller' |
+        tail -n 3 | cut -c 1-220 || true
+    done
+  } >"${failure_diagnostics}" 2>&1
   exit 1
 fi
 
