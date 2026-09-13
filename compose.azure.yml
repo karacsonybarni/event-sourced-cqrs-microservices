@@ -30,6 +30,10 @@ services:
     environment:
       KAFKA_EXTERNAL_HOST: "${KAFKA_VNET_HOST:?Set KAFKA_VNET_HOST}"
       KAFKA_EXTERNAL_PORT: 9094
+    # Short-lived admin clients should not pay for optimizing JIT compilation
+    # on the burst-credit-limited host. Keep the broker JVM unchanged.
+    healthcheck: &azure_kafka_healthcheck
+      test: ["CMD-SHELL", "test -f /tmp/kafka-controller-ready && KAFKA_JVM_PERFORMANCE_OPTS='-server -XX:+UseG1GC -XX:TieredStopAtLevel=1' /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
     mem_limit: 640m
     logging: *azure_logging
 
@@ -39,6 +43,7 @@ services:
     environment:
       KAFKA_EXTERNAL_HOST: "${KAFKA_VNET_HOST:?Set KAFKA_VNET_HOST}"
       KAFKA_EXTERNAL_PORT: 9095
+    healthcheck: *azure_kafka_healthcheck
     mem_limit: 640m
     logging: *azure_logging
 
@@ -48,10 +53,13 @@ services:
     environment:
       KAFKA_EXTERNAL_HOST: "${KAFKA_VNET_HOST:?Set KAFKA_VNET_HOST}"
       KAFKA_EXTERNAL_PORT: 9096
+    healthcheck: *azure_kafka_healthcheck
     mem_limit: 640m
     logging: *azure_logging
 
   kafka-init:
+    environment:
+      KAFKA_JVM_PERFORMANCE_OPTS: "-server -XX:+UseG1GC -XX:TieredStopAtLevel=1"
     mem_limit: 256m
     logging: *azure_logging
 

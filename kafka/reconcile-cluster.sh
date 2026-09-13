@@ -55,14 +55,17 @@ csv_count() {
 }
 
 write_reassignment_file() {
-  local topic description summary replication_factor partition_line partition replicas
+  local topic descriptions description summary replication_factor partition_line partition replicas
   local broker replica separator='' partition_separator=''
   local -a current_replicas assignment
 
   reassignment_needed=false
+  # One metadata snapshot per pass avoids starting a JVM for every topic.
+  descriptions=$("${KAFKA_HOME}/bin/kafka-topics.sh" \
+    --bootstrap-server "${BOOTSTRAP_SERVERS}" --describe) || return 1
   printf '{"version":1,"partitions":['
   for topic in "$@"; do
-    description="$(topic_description "${topic}")"
+    description=$(awk -v topic="${topic}" '$1 == "Topic:" && $2 == topic { print }' <<<"${descriptions}")
     summary="$(sed -n '1p' <<<"${description}")"
     replication_factor="$(sed -n 's/.*ReplicationFactor: \([0-9][0-9]*\).*/\1/p' <<<"${summary}")"
     if [[ -z "${replication_factor}" ]]; then
@@ -153,11 +156,14 @@ reassign_topics_to_three() {
 }
 
 all_partitions_have_rf_and_isr_three() {
-  local topic description summary replication_factor partition_line replicas isr
+  local topic descriptions description summary replication_factor partition_line replicas isr
+  # Refresh on every retry, but share that response across governed topics.
+  if ! descriptions=$("${KAFKA_HOME}/bin/kafka-topics.sh" \
+      --bootstrap-server "${BOOTSTRAP_SERVERS}" --describe 2>/dev/null); then
+    return 1
+  fi
   for topic in "$@"; do
-    if ! description="$(topic_description "${topic}" 2>/dev/null)"; then
-      return 1
-    fi
+    description=$(awk -v topic="${topic}" '$1 == "Topic:" && $2 == topic { print }' <<<"${descriptions}")
     summary="$(sed -n '1p' <<<"${description}")"
     replication_factor="$(sed -n 's/.*ReplicationFactor: \([0-9][0-9]*\).*/\1/p' <<<"${summary}")"
     [[ "${replication_factor}" == "3" ]] || return 1
@@ -197,6 +203,11 @@ wait_for_topic() {
   echo "${topic} was not created within the bounded wait" >&2
   return 1
 }
+
+# Allow focused tests to exercise metadata validation without mutating Kafka.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
 
 for topic in "${governed_topics[@]}"; do
   create_args=(
