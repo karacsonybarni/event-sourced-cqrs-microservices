@@ -225,6 +225,8 @@ jobs:
             scripts/*.sh scripts/aws/*.sh scripts/azure/*.sh scripts/kafka/*.sh kafka/*.sh
       - name: Test Kafka log-directory discovery
         run: bash scripts/kafka/test-log-directory.sh
+      - name: Test batched Kafka reconciliation metadata
+        run: bash scripts/kafka/test-reconciliation-metadata.sh
 
   integration:
     needs: [changes, build, infrastructure]
